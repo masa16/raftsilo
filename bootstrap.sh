@@ -1,6 +1,6 @@
 NCPU=$(fgrep 'processor' /proc/cpuinfo | wc -l)
 
-git submodule update --init --recursive
+git submodule update --init
 
 cd third_party/raft
 rm -rf build
@@ -10,8 +10,11 @@ cmake ..
 make -j $NCPU
 make test
 
+cd ../../ccbench/third_party
+git submodule update --init masstree mimalloc
+
 # build_tools/bootstrap.sh
-cd ../../ccbench/third_party/masstree
+cd masstree
 ./bootstrap.sh
 ./configure --disable-assertions
 make clean
@@ -26,10 +29,3 @@ mkdir -p out/release
 cd out/release
 cmake -DCMAKE_BUILD_TYPE=Release ../..
 make clean all -j $NCPU
-
-#cd ../../../../silo
-#rm -rf build
-#mkdir build
-#cd build
-#cmake -DCMAKE_BUILD_TYPE=Release ..
-#make -j $NCPU
