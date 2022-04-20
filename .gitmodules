@@ -1,0 +1,6 @@
+[submodule "third_party/raft"]
+	path = third_party/raft
+	url = https://github.com/RedisLabs/raft.git
+[submodule "third_party/ccbench"]
+	path = third_party/ccbench
+	url = https://github.com/thawk105/ccbench.git
