@@ -153,7 +153,7 @@ static int request_handler(zloop_t *loop, zsock_t *socket, void *udata)
     {
       RequestVoteResponse rvr(raft);
       zmq_msgpk_recv(socket, rvr);
-      msg_requestvote_response_t m;
+      raft_requestvote_resp_t m;
       rvr.restore(m);
       raft_recv_requestvote_response(raft, raft_get_node(raft, id), &m);
       break;
@@ -162,7 +162,7 @@ static int request_handler(zloop_t *loop, zsock_t *socket, void *udata)
     {
       AppendEntriesResponse aer(raft);
       zmq_msgpk_recv(socket, aer);
-      msg_appendentries_response_t m;
+      raft_appendentries_resp_t m;
       aer.restore(m);
       raft_recv_appendentries_response(raft, raft_get_node(raft, id), &m);
       break;
@@ -231,9 +231,9 @@ static int router_handler(zloop_t *loop, zsock_t *socket, void *udata)
     {
       RequestVote rv(raft);
       zmq_msgpk_recv(socket, rv);
-      msg_requestvote_t mrv;
+      raft_requestvote_req_t mrv;
       rv.restore(mrv);
-      msg_requestvote_response_t mrvr;
+      raft_requestvote_resp_t mrvr;
       raft_recv_requestvote(raft, raft_get_node(raft, id), &mrv, &mrvr);
       rc = zmq_msg_send(&msg_id, socket, ZMQ_SNDMORE);
       assert(rc!=-1);
@@ -247,9 +247,9 @@ static int router_handler(zloop_t *loop, zsock_t *socket, void *udata)
     {
       AppendEntries ae(raft);
       zmq_msgpk_recv(socket, ae);
-      msg_appendentries_t mae;
+      raft_appendentries_req_t mae;
       ae.restore(mae);
-      msg_appendentries_response_t maer;
+      raft_appendentries_resp_t maer;
       raft_recv_appendentries(raft, raft_get_node(raft, id), &mae, &maer);
       rc = zmq_msg_send(&msg_id, socket, ZMQ_SNDMORE);
       assert(rc!=-1);
@@ -259,16 +259,16 @@ static int router_handler(zloop_t *loop, zsock_t *socket, void *udata)
       zmq_msgpk_send_with_type(socket, aer);
       break;
     }
-  case RAFT_MSG_CLIENTCOMMAND:
+  case RAFT_MSG_CLIENTREQUEST:
     {
-      ClientCommand cmd;
-      zmq_msgpk_recv(socket, cmd);
+      ClientRequest crq;
+      zmq_msgpk_recv(socket, crq);
       if (raft_is_leader(raft)) {
-        Entry ety(raft_get_current_term(raft), ++ety_id, ety_type, cmd.data_);
-        msg_entry_t *mety = ety.restore();
-        msg_entry_response_t metyr;
+        Entry ety(raft_get_current_term(raft), ++ety_id, ety_type, crq.command_);
+        raft_entry_t *mety = ety.restore();
+        raft_entry_resp_t metyr;
         rc = raft_recv_entry(raft, mety, &metyr);
-        ClientCommandResponse ccr(raft_get_nodeid(raft), id, rc);
+        ClientRequestResponse ccr(raft_get_nodeid(raft), id, rc);
         rc = zmq_msg_send(&msg_id, socket, ZMQ_SNDMORE);
         assert(rc!=-1);
         rc = zmq_msg_send(&msg_null, socket, ZMQ_SNDMORE);
@@ -299,7 +299,7 @@ static int router_handler(zloop_t *loop, zsock_t *socket, void *udata)
 
 
 static int __raft_requestvote(raft_server_t* raft, void* udata,
-  raft_node_t* node, msg_requestvote_t* msg)
+  raft_node_t* node, raft_requestvote_req_t* msg)
 {N();
   raft_node_id_t id = raft_node_get_id(node);
   Server *sv = (Server*)udata;
@@ -310,7 +310,7 @@ static int __raft_requestvote(raft_server_t* raft, void* udata,
 }
 
 static int __raft_appendentries(raft_server_t* raft, void* udata,
-  raft_node_t* node, msg_appendentries_t* msg)
+  raft_node_t* node, raft_appendentries_req_t* msg)
 {N();
   raft_node_id_t id = raft_node_get_id(node);
   Server *sv = (Server*)udata;
@@ -353,14 +353,14 @@ static int s_timer_event(zloop_t *loop, int timer_id, void *udata)
       printf("--- entry ----\n");
       std::string data("abcdefghij");
       unsigned int data_len = (unsigned int)(data.size());
-      msg_entry_t *e = raft_entry_new(data_len);
+      raft_entry_t *e = raft_entry_new(data_len);
       e->term = raft_get_current_term(raft);
       e->id = ++entry_id;
       e->type = 99;
       e->refs = 1;
       e->free_func = 0;
       memcpy(e->data, data.c_str(), data_len);
-      msg_entry_response_t mer;
+      raft_entry_resp_t mer;
       int rc;
       rc = raft_recv_entry(raft, e, &mer);
       EntryResponse er(raft, mer);

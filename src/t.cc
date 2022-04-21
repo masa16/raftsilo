@@ -13,8 +13,8 @@ extern "C" {
   //#include "raft_private.h"
 }
 #include "raft_msgpack.hh"
-#include "server.hh"
-#include "client.hh"
+#include "raft_server.hh"
+#include "raft_client.hh"
 
 //#define N() do{fprintf(stderr, "%16s %4d %16s\n", __FILE__, __LINE__, __func__); fflush(stderr);} while(0)
 #define N() {}

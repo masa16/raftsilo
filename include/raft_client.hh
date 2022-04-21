@@ -21,6 +21,9 @@ public:
   HostData server_;
   zsock_t *socket_ = NULL;
   zloop_t *loop_ = NULL;
+  //std::vector<Procedure> pro_set_;
+  std::string data_;
+  //Result result_;
 
   Client(raft_node_id_t id, zloop_t *loop, HostData &server, void *context) :
     id_(id), loop_(loop), server_(server), context_(context) {}
@@ -81,7 +84,7 @@ static int client_handler(zloop_t *loop, zsock_t *socket, void *udata)
   zmq_msgpk_recv(socket, type);
 
   switch(type) {
-  case RAFT_MSG_FORWARD_LEADER:
+  case RAFT_MSG_LEADER_HINT:
     {
       HostData h;
       zmq_msgpk_recv(socket, h);
@@ -95,9 +98,9 @@ static int client_handler(zloop_t *loop, zsock_t *socket, void *udata)
       }
       break;
     }
-  case RAFT_MSG_CLIENTCOMMAND_RESPONSE:
+  case RAFT_MSG_CLIENTREQUEST_RESPONSE:
     {
-      ClientCommandResponse ccr;
+      ClientRequestResponse ccr;
       zmq_msgpk_recv(socket, ccr);
       usleep(100000);
       break;
@@ -106,6 +109,11 @@ static int client_handler(zloop_t *loop, zsock_t *socket, void *udata)
     printf("type=%d\n",type);
     abort();
   }
+
+  //int thid=0;
+  //makeProcedure(c->pro_set_, rnd, zipf, FLAGS_tuple_num, FLAGS_max_ope,
+  //  FLAGS_thread_num, FLAGS_rratio, FLAGS_rmw, FLAGS_ycsb, false,
+  //  thid, c->result_);
 
   // send next data
   c->send("abcdefghij");
@@ -146,7 +154,7 @@ void Client::reconnect(HostData &server)
 
 void Client::send(std::string &data)
 {
-  ClientCommand cmd(id_, server_.id_, data);
+  ClientRequest cmd(id_, server_.id_, data);
   assert(socket_);
 
   // send empty delimiter frame

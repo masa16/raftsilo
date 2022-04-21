@@ -25,16 +25,16 @@ typedef enum {
   RAFT_MSG_APPENDENTRIES_RESPONSE,
   RAFT_MSG_ENTRY,
   RAFT_MSG_ENTRY_RESPONSE,
-  RAFT_MSG_FORWARD_LEADER,
-  RAFT_MSG_CLIENTCOMMAND,
-  RAFT_MSG_CLIENTCOMMAND_RESPONSE,
+  RAFT_MSG_CLIENTREQUEST,
+  RAFT_MSG_CLIENTREQUEST_RESPONSE,
+  RAFT_MSG_LEADER_HINT,
 } raft_message_type_e;
 
 
 static char _state_char(raft_server_t *raft)
 {
   switch(raft_get_state(raft)) {
-  case RAFT_STATE_NONE: return 'N';
+  //case RAFT_STATE_NONE: return 'N';
   case RAFT_STATE_FOLLOWER: return 'F';
   case RAFT_STATE_PRECANDIDATE: return 'P';
   case RAFT_STATE_CANDIDATE: return 'C';
@@ -43,49 +43,53 @@ static char _state_char(raft_server_t *raft)
   return ' ';
 }
 
-class ClientCommand
+
+class ClientRequest
 {
 public:
-  static const int MSG_TYPE = RAFT_MSG_CLIENTCOMMAND;
+  static const int MSG_TYPE = RAFT_MSG_CLIENTREQUEST;
   raft_node_id_t   source_node_;
   raft_node_id_t   target_node_;
-  std::string      data_;
-  MSGPACK_DEFINE(source_node_,target_node_,data_);
+  long             sequence_num_;
+  std::string      command_;
+  MSGPACK_DEFINE(source_node_,target_node_,command_);
 
-  ClientCommand() {}
-  ClientCommand(raft_node_id_t source_node, raft_node_id_t target_node, std::string data) :
-    source_node_(source_node), target_node_(target_node), data_(data) {}
+  ClientRequest() {}
+  ClientRequest(raft_node_id_t source_node, raft_node_id_t target_node, std::string command) :
+    source_node_(source_node), target_node_(target_node), command_(command) {}
   void print_send() {
-    printf("send CC   %d->%d: \"%s\"\n", source_node_, target_node_, data_.c_str());
+    printf("send CR   %d->%d: \"%s\"\n", source_node_, target_node_, command_.c_str());
   }
   void print_recv() {
-    printf("recv CC   %d->%d: \"%s\"\n", source_node_, target_node_, data_.c_str());
+    printf("recv CR   %d->%d: \"%s\"\n", source_node_, target_node_, command_.c_str());
   }
 };
 
-const int ClientCommand::MSG_TYPE;
+const int ClientRequest::MSG_TYPE;
 
-class ClientCommandResponse
+class ClientRequestResponse
 {
 public:
-  static const int MSG_TYPE = RAFT_MSG_CLIENTCOMMAND_RESPONSE;
+  static const int MSG_TYPE = RAFT_MSG_CLIENTREQUEST_RESPONSE;
   raft_node_id_t   source_node_;
-  raft_node_id_t   target_node_=0;
-  int              fail_;
-  MSGPACK_DEFINE(source_node_,target_node_,fail_);
+  raft_node_id_t   target_node_;
+  int              status_;
+  std::string      leader_hint_;
+  MSGPACK_DEFINE(source_node_,target_node_,status_);
 
-  ClientCommandResponse() {}
-  ClientCommandResponse(raft_node_id_t source_node, raft_node_id_t target_node, int fail) :
-    source_node_(source_node), target_node_(target_node), fail_(fail) {}
+  ClientRequestResponse() {}
+  ClientRequestResponse(raft_node_id_t source_node, raft_node_id_t target_node, int status) :
+    source_node_(source_node), target_node_(target_node), status_(status) {}
   void print_send() {
-    printf("send CCR   %d->%d: fail_=%d\n", source_node_, target_node_, fail_);
+    printf("send CRR   %d->%d: status_=%d\n", source_node_, target_node_, status_);
   }
   void print_recv() {
-    printf("recv CCR   %d->%d: fail_=%d\n", source_node_, target_node_, fail_);
+    printf("recv CRR   %d->%d: status_=%d\n", source_node_, target_node_, status_);
   }
 };
 
-const int ClientCommandResponse::MSG_TYPE;
+const int ClientRequestResponse::MSG_TYPE;
+
 
 class Entry
 {
@@ -99,15 +103,15 @@ public:
   Entry() {}
   Entry(raft_term_t term, raft_entry_id_t id, short type, std::string data) :
     term_(term), id_(id), type_(type), data_(data) {}
-  Entry(msg_entry_t *e) {
+  Entry(raft_entry_t *e) {
     term_ = e->term;
     id_   = e->id;
     type_ = e->type;
     data_ = std::string(e->data, e->data_len);
   }
-  msg_entry_t *restore() {
+  raft_entry_t *restore() {
     unsigned int data_len = (unsigned int)(data_.size());
-    msg_entry_t *e = raft_entry_new(data_len);
+    raft_entry_t *e = raft_entry_new(data_len);
     e->term = term_;
     e->id = id_;
     e->type = type_;
@@ -137,7 +141,7 @@ public:
   MSGPACK_DEFINE(/*source_node_, target_node_,*/ id_, term_, idx_);
   EntryResponse() {}
   EntryResponse(raft_server_t *raft) : raft_(raft) {}
-  EntryResponse(raft_server_t *raft, /*raft_node_t *raft_node,*/ msg_entry_response_t &m) {
+  EntryResponse(raft_server_t *raft, /*raft_node_t *raft_node,*/ raft_entry_resp_t &m) {
     raft_ = raft;
     source_node_  = raft_get_nodeid(raft);
     //target_node_  = raft_node_get_id(raft_node);
@@ -145,7 +149,7 @@ public:
     term_ = m.term;
     idx_  = m.idx;
   }
-  void restore(msg_entry_response_t &m) {
+  void restore(raft_entry_resp_t &m) {
     m.id = id_;
     m.term = term_;
     m.idx = idx_;
@@ -169,7 +173,7 @@ const int EntryResponse::MSG_TYPE;
 
 class HostData {
 public:
-  static const int MSG_TYPE = RAFT_MSG_FORWARD_LEADER;
+  static const int MSG_TYPE = RAFT_MSG_LEADER_HINT;
   raft_node_id_t id_ = -1;
   std::string hostname_;
   std::uint32_t port_ = 0;
@@ -228,7 +232,7 @@ public:
     prev_log_idx_, prev_log_term_, leader_commit_,
     msg_id_, entries_);
   AppendEntries(raft_server_t *raft) : raft_(raft) {}
-  AppendEntries(raft_server_t *raft, raft_node_t *raft_node, msg_appendentries_t &m) {
+  AppendEntries(raft_server_t *raft, raft_node_t *raft_node, raft_appendentries_req_t &m) {
     raft_ = raft;
     source_node_   = raft_get_nodeid(raft);
     target_node_   = raft_node_get_id(raft_node);
@@ -242,7 +246,7 @@ public:
       entries_.emplace_back(m.entries[i]);
     }
   }
-  void restore(msg_appendentries_t &m) {
+  void restore(raft_appendentries_req_t &m) {
     int n;
     m.leader_id     = leader_id_;
     m.term          = term_;
@@ -251,7 +255,7 @@ public:
     m.leader_commit = leader_commit_;
     m.msg_id        = msg_id_;
     m.n_entries = n = entries_.size();
-    m.entries       = (msg_entry_t**)raft_malloc(sizeof(msg_entry_t*) * n);
+    m.entries       = (raft_entry_t**)raft_malloc(sizeof(raft_entry_t*) * n);
     for (int i=0; i < n; ++i) {
       m.entries[i] = entries_[i].restore();
     }
@@ -296,7 +300,7 @@ public:
     term_(term),
     success_(success),
     current_idx_(current_idx) {}
-  AppendEntriesResponse(raft_server_t *raft, raft_node_t *raft_node, msg_appendentries_response_t &m) {
+  AppendEntriesResponse(raft_server_t *raft, raft_node_t *raft_node, raft_appendentries_resp_t &m) {
     raft_ = raft;
     source_node_ = raft_get_nodeid(raft);
     target_node_ = raft_node_get_id(raft_node);
@@ -305,7 +309,7 @@ public:
     success_     = m.success;
     current_idx_ = m.current_idx;
   }
-  void restore(msg_appendentries_response_t &m) {
+  void restore(raft_appendentries_resp_t &m) {
     m.msg_id      = msg_id_;
     m.term        = term_;
     m.success     = success_;
@@ -342,10 +346,10 @@ public:
   raft_node_id_t candidate_id_;
   raft_index_t   last_log_idx_;
   raft_term_t    last_log_term_;
-  int            transfer_leader_;
-  MSGPACK_DEFINE(source_node_, target_node_, prevote_, term_, candidate_id_, last_log_idx_, last_log_term_, transfer_leader_);
+  //int            transfer_leader_;
+  MSGPACK_DEFINE(source_node_, target_node_, prevote_, term_, candidate_id_, last_log_idx_, last_log_term_);
   RequestVote(raft_server_t *raft) : raft_(raft) {}
-  RequestVote(raft_server_t *raft, raft_node_t *raft_node, msg_requestvote_t &m) {
+  RequestVote(raft_server_t *raft, raft_node_t *raft_node, raft_requestvote_req_t &m) {
     raft_ = raft;
     source_node_     = raft_get_nodeid(raft);
     target_node_     = raft_node_get_id(raft_node);
@@ -354,20 +358,20 @@ public:
     candidate_id_    = m.candidate_id;
     last_log_idx_    = m.last_log_idx;
     last_log_term_   = m.last_log_term;
-    transfer_leader_ = m.transfer_leader;
+    //transfer_leader_ = m.transfer_leader;
   }
-  void restore(msg_requestvote_t &m) {
+  void restore(raft_requestvote_req_t &m) {
     m.prevote         = prevote_;
     m.term            = term_;
     m.candidate_id    = candidate_id_;
     m.last_log_idx    = last_log_idx_;
     m.last_log_term   = last_log_term_;
-    m.transfer_leader = transfer_leader_;
+    //m.transfer_leader = transfer_leader_;
   }
   void print() {
     raft_node_id_t l = raft_get_leader_id(raft_);
-    printf("L=%d prevote=%d term=%ld candidate_id=%d last_log_idx=%ld last_log_term=%ld transfer_leader=%d\n",
-      l, prevote_, term_, candidate_id_, last_log_idx_, last_log_term_, transfer_leader_);
+    printf("L=%d prevote=%d term=%ld candidate_id=%d last_log_idx=%ld last_log_term=%ld\n",
+      l, prevote_, term_, candidate_id_, last_log_idx_, last_log_term_);
   }
   void print_send() {
     printf("send RV  %d%c->%d:", source_node_, _state_char(raft_), target_node_);
@@ -396,7 +400,7 @@ public:
   int            vote_granted_;
   MSGPACK_DEFINE(source_node_, target_node_, prevote_, request_term_, term_, vote_granted_);
   RequestVoteResponse(raft_server_t *raft) : raft_(raft) {}
-  RequestVoteResponse(raft_server_t *raft, raft_node_t *raft_node, msg_requestvote_response_t &m) {
+  RequestVoteResponse(raft_server_t *raft, raft_node_t *raft_node, raft_requestvote_resp_t &m) {
     raft_ = raft;
     source_node_  = raft_get_nodeid(raft);
     target_node_  = raft_node_get_id(raft_node);
@@ -405,7 +409,7 @@ public:
     term_         = m.term;
     vote_granted_ = m.vote_granted;
   }
-  void restore(msg_requestvote_response_t &m) {
+  void restore(raft_requestvote_resp_t &m) {
     m.prevote      = prevote_;
     m.request_term = request_term_;
     m.term         = term_;

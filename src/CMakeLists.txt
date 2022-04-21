@@ -34,7 +34,7 @@ add_executable(silo.exe ${SILO_SOURCES})
 
 target_include_directories(silo.exe
   PUBLIC ../third_party/ccbench/silo
-  PUBLIC ../raft
+  PUBLIC ../include
 )
 
 target_link_libraries(silo.exe
