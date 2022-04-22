@@ -32,9 +32,11 @@
 #include "../include/util.hh"
 #include "../include/zipf.hh"
 
-using namespace std;
+#include "raft_server.hh"
 
-void worker(size_t thid, char &ready, const bool &start, const bool &quit) {
+//using namespace std;
+
+void worker(size_t thid, const bool &quit, TxQueue *tx_queue) {
   Result &myres = std::ref(SiloResult[thid]);
   Xoroshiro128Plus rnd;
   rnd.init();
@@ -74,22 +76,26 @@ void worker(size_t thid, char &ready, const bool &start, const bool &quit) {
   MasstreeWrapper<Tuple>::thread_init(int(thid));
 #endif
 
-  storeRelease(ready, 1);
-  while (!loadAcquire(start)) _mm_pause();
+  //storeRelease(ready, 1);
+  //while (!loadAcquire(start)) _mm_pause();
   if (thid == 0) epoch_timer_start = rdtscp();
   while (!loadAcquire(quit)) {
-#if PARTITION_TABLE
-    makeProcedure(trans.pro_set_, rnd, zipf, FLAGS_tuple_num, FLAGS_max_ope,
-                  FLAGS_thread_num, FLAGS_rratio, FLAGS_rmw, FLAGS_ycsb, true,
-                  thid, myres);
-#else
-    makeProcedure(trans.pro_set_, rnd, zipf, FLAGS_tuple_num, FLAGS_max_ope,
-                  FLAGS_thread_num, FLAGS_rratio, FLAGS_rmw, FLAGS_ycsb, false,
-                  thid, myres);
-#endif
+//#if PARTITION_TABLE
+//    makeProcedure(trans.pro_set_, rnd, zipf, FLAGS_tuple_num, FLAGS_max_ope,
+//                  FLAGS_thread_num, FLAGS_rratio, FLAGS_rmw, FLAGS_ycsb, true,
+//                  thid, myres);
+//#else
+//    makeProcedure(trans.pro_set_, rnd, zipf, FLAGS_tuple_num, FLAGS_max_ope,
+//                  FLAGS_thread_num, FLAGS_rratio, FLAGS_rmw, FLAGS_ycsb, false,
+//                  thid, myres);
+//#endif
+
+    ClientRequest tx = std::move(tx_queue->pop());
+    std::vector<ProcedureX> pro_set = tx.command_;
+    printf("       -------- start transaction --------\n");
 
 #if PROCEDURE_SORT
-    sort(trans.pro_set_.begin(), trans.pro_set_.end());
+    sort(pro_set.begin(), pro_set.end());
 #endif
 
 RETRY:
@@ -104,7 +110,7 @@ RETRY:
     if (loadAcquire(quit)) break;
 
     trans.begin();
-    for (auto itr = trans.pro_set_.begin(); itr != trans.pro_set_.end();
+    for (auto itr = pro_set.begin(); itr != pro_set.end();
          ++itr) {
       if ((*itr).ope_ == Ope::READ) {
         trans.read((*itr).key_);
@@ -136,22 +142,25 @@ RETRY:
   return;
 }
 
+extern int raft_test_start(TxQueue *tx_queue);
+
 int main(int argc, char *argv[]) try {
   gflags::SetUsageMessage("Silo benchmark.");
   gflags::ParseCommandLineFlags(&argc, &argv, true);
   chkArg();
   makeDB();
 
-  alignas(CACHE_LINE_SIZE) bool start = false;
+  //alignas(CACHE_LINE_SIZE) bool start = false;
   alignas(CACHE_LINE_SIZE) bool quit = false;
   initResult();
-  std::vector<char> readys(FLAGS_thread_num);
+  //std::vector<char> readys(FLAGS_thread_num);
   std::vector<std::thread> thv;
+  TxQueue tx_queue;
   for (size_t i = 0; i < FLAGS_thread_num; ++i)
-    thv.emplace_back(worker, i, std::ref(readys[i]), std::ref(start),
-                     std::ref(quit));
-  waitForReady(readys);
-  storeRelease(start, true);
+    thv.emplace_back(worker, i, std::ref(quit), &tx_queue);
+  raft_test_start(&tx_queue);
+  //waitForReady(readys);
+  //storeRelease(start, true);
   for (size_t i = 0; i < FLAGS_extime; ++i) {
     sleepMs(1000);
   }

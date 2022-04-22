@@ -2,10 +2,10 @@ RAFTD=../third_party/raft
 
 COPTS=-Werror -Werror=return-type -Werror=uninitialized -Wcast-align -fno-omit-frame-pointer -fno-common -fsigned-char -Wunused-variable -g -O2 -fPIC -fprofile-arcs -ftest-coverage -Wno-pointer-sign
 
-CPPOPTS=-Werror -Werror=return-type -Werror=uninitialized -Wcast-align -fno-omit-frame-pointer -fno-common -fsigned-char -Wunused-variable -g -O2 -fPIC #-fprofile-arcs -ftest-coverage
+CPPOPTS=-Werror -Werror=return-type -Werror=uninitialized -Wcast-align -fno-omit-frame-pointer -fno-common -fsigned-char -Wunused-variable -g -O2 -fPIC -std=c++17 #-fprofile-arcs -ftest-coverage
 
-CPPFLAGS=$(CPPOPTS) -I $(RAFTD)/include -I ../include # -I $(RAFTD)/tests
-LDLIBS=$(RAFTD)/build/libraft.a -lzmq -lczmq -lmsgpackc -lstdc++
+CPPFLAGS=$(CPPOPTS) -I$(RAFTD)/include -I../include -I../third_party/ccbench/silo/include -I../third_party/ccbench/include -DVAL_SIZE=10
+LDLIBS=$(RAFTD)/build/libraft.a -lzmq -lczmq -lmsgpackc -lstdc++ -lm
 
 all: t
 

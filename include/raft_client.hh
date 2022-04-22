@@ -1,7 +1,7 @@
 #pragma once
+#include <cassert>
 extern "C" {
   #include <stdbool.h>
-  #include <assert.h>
   #include <stdlib.h>
   #include <stdio.h>
   #include <string.h>
@@ -10,6 +10,13 @@ extern "C" {
   #include <czmq.h>
 }
 #include "raft_msgpack.hh"
+#include "procedurex.hh"
+#include "random.hh"
+#include "result.hh"
+#include "tsc.hh"
+#include "zipf.hh"
+#include "include/util.hh"
+#include "include/common.hh"
 
 #define N() {}
 
@@ -21,12 +28,19 @@ public:
   HostData server_;
   zsock_t *socket_ = NULL;
   zloop_t *loop_ = NULL;
-  //std::vector<Procedure> pro_set_;
+  std::vector<ProcedureX> pro_set_;
+  long sequence_num_ = 0;
   std::string data_;
-  //Result result_;
+  Result result_;
+  Xoroshiro128Plus rnd_;
+  FastZipf *zipf_;
 
   Client(raft_node_id_t id, zloop_t *loop, HostData &server, void *context) :
-    id_(id), loop_(loop), server_(server), context_(context) {}
+    id_(id), loop_(loop), server_(server), context_(context) {
+    pro_set_.reserve(FLAGS_max_ope);
+    rnd_.init();
+    zipf_ = new FastZipf(&rnd_, FLAGS_zipf_skew, FLAGS_tuple_num);
+  }
 
   ~Client() {
     stop();
@@ -35,8 +49,9 @@ public:
   void start();
   void connect();
   void reconnect(HostData &server);
-  void send(std::string &data);
-  void send(const char *data) {std::string s(data); send(s);}
+  void send(std::vector<ProcedureX> &data);
+  //void send(const char *data) {std::string s(data); send(s);}
+  void send() {std::vector<ProcedureX> s; send(s);}
   void stop() {
     if (socket_) {
       zloop_reader_end(loop_, socket_);
@@ -49,9 +64,66 @@ public:
 static int c_timer_event(zloop_t *loop, int timer_id, void *udata)
 {
   Client *c = (Client*)udata;
-  c->send("");
+  c->send();
   return 0;
 }
+
+
+inline static void makeProcedureX(std::vector <ProcedureX> &pro, Xoroshiro128Plus &rnd,
+                                 FastZipf &zipf, size_t tuple_num, size_t max_ope,
+                                 size_t thread_num, size_t rratio, bool rmw, bool ycsb,
+                                 bool partition, size_t thread_id, [[maybe_unused]]Result &res) {
+#if ADD_ANALYSIS
+  uint64_t start = rdtscp();
+#endif
+  pro.clear();
+  bool ronly_flag(true), wonly_flag(true);
+  for (size_t i = 0; i < max_ope; ++i) {
+    uint64_t tmpkey;
+    // decide access destination key.
+    if (ycsb) {
+      if (partition) {
+        size_t block_size = tuple_num / thread_num;
+        tmpkey = (block_size * thread_id) + (zipf() % block_size);
+      } else {
+        tmpkey = zipf() % tuple_num;
+      }
+    } else {
+      if (partition) {
+        size_t block_size = tuple_num / thread_num;
+        tmpkey = (block_size * thread_id) + (rnd.next() % block_size);
+      } else {
+        tmpkey = rnd.next() % tuple_num;
+      }
+    }
+
+    // decide operation type.
+    if ((rnd.next() % 100) < rratio) {
+      wonly_flag = false;
+      pro.emplace_back(Ope::READ, tmpkey);
+    } else {
+      ronly_flag = false;
+      if (rmw) {
+        pro.emplace_back(Ope::READ_MODIFY_WRITE, tmpkey);
+      } else {
+        pro.emplace_back(Ope::WRITE, tmpkey);
+      }
+    }
+  }
+
+  (*pro.begin()).ronly_ = ronly_flag;
+  (*pro.begin()).wonly_ = wonly_flag;
+
+#if KEY_SORT
+  std::sort(pro.begin(), pro.end());
+#endif // KEY_SORT
+
+#if ADD_ANALYSIS
+  res.local_make_procedure_latency_ += rdtscp() - start;
+#endif
+}
+
+
 
 static int client_handler(zloop_t *loop, zsock_t *socket, void *udata)
 {N();
@@ -110,13 +182,13 @@ static int client_handler(zloop_t *loop, zsock_t *socket, void *udata)
     abort();
   }
 
-  //int thid=0;
-  //makeProcedure(c->pro_set_, rnd, zipf, FLAGS_tuple_num, FLAGS_max_ope,
-  //  FLAGS_thread_num, FLAGS_rratio, FLAGS_rmw, FLAGS_ycsb, false,
-  //  thid, c->result_);
+  int thid=0;
+  makeProcedureX(c->pro_set_, c->rnd_, *(c->zipf_), FLAGS_tuple_num, FLAGS_max_ope,
+    FLAGS_thread_num, FLAGS_rratio, FLAGS_rmw, FLAGS_ycsb, false,
+    thid, c->result_);
 
   // send next data
-  c->send("abcdefghij");
+  c->send(c->pro_set_);
   return 0;
 }
 
@@ -142,9 +214,10 @@ void Client::connect()
 
 void Client::reconnect(HostData &server)
 {
+  int rc;
   if (socket_) {
     zloop_reader_end(loop_, socket_);
-    int rc = zmq_close(socket_);
+    rc = zmq_close(socket_);
     assert(rc==0);
     socket_ = NULL;
   }
@@ -152,9 +225,9 @@ void Client::reconnect(HostData &server)
   connect();
 }
 
-void Client::send(std::string &data)
+void Client::send(std::vector<ProcedureX> &data)
 {
-  ClientRequest cmd(id_, server_.id_, data);
+  ClientRequest cmd(id_, server_.id_, ++sequence_num_, data);
   assert(socket_);
 
   // send empty delimiter frame

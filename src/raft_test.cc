@@ -20,12 +20,44 @@ extern "C" {
 #define N() {}
 
 
+class ServerData {
+public:
+  raft_node_id_t id_;
+  std::vector<HostData> &hosts_;
+  void *context_;
+  zactor_t *actor_;
+  TxQueue *tx_queue_;
+
+  ServerData(raft_node_id_t id, std::vector<HostData> &hosts, void *context, TxQueue *tx_queue) :
+    id_(id), hosts_(hosts), context_(context), tx_queue_(tx_queue) {}
+
+  void setup(void (*func)(zsock_t*, void*)) {
+    actor_ = zactor_new(func, this);
+    //printf("new actor_=%lu\n",(unsigned long)actor_);
+    assert(actor_);
+    // sync
+    char *r;
+    zsock_recv(actor_, "s", &r);
+    assert(strcmp(r,"READY")==0);
+    free(r);
+  }
+  void start() {
+    //printf("start actor_=%lu\n",(unsigned long)actor_);
+    const char s[] = "GO";
+    zsock_send(actor_, "s", s);
+  }
+  void destroy() {
+    zactor_destroy(&actor_);
+  }
+};
+
+
 static void server_thread(zsock_t *pipe, void *udata)
 {
   zsock_signal(pipe, 0);
-  ActorData *a = (ActorData*)udata;
+  ServerData *a = (ServerData*)udata;
   //printf("a->id_=%d\n",a->id_);
-  Server sv(a->context_, a->id_);
+  Server sv(a->context_, a->id_, a->tx_queue_);
   sv.setup(a->hosts_);
   // synchronize
   const char s[] = "READY";
@@ -63,7 +95,7 @@ static void client_thread(zsock_t *pipe, void *udata)
   }
   for (auto c : clients) c->connect();
   //usleep(1000);
-  for (auto c : clients) c->send("");
+  for (auto c : clients) c->send();
 
   zloop_start(loop);
 
@@ -73,19 +105,19 @@ static void client_thread(zsock_t *pipe, void *udata)
 
 #define NSERVERS 5
 
-int main(void)
+int raft_test_start(TxQueue *tx_queue)
 {
   int rc;
   void *context = zmq_ctx_new();
   assert(context);
   std::vector<HostData> hosts;
-  std::vector<ActorData*> actors;
+  std::vector<ServerData*> actors;
 
   for (int i=1; i<=NSERVERS; i++) {
     hosts.emplace_back(i,"localhost",51110+i);
   }
   for (auto h : hosts) {
-    ActorData *a = new ActorData(h.id_, hosts, context);
+    ServerData *a = new ServerData(h.id_, hosts, context, tx_queue);
     actors.emplace_back(a);
   }
   for (auto a : actors) {

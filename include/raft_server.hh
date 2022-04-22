@@ -1,52 +1,29 @@
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <cassert>
+
 extern "C" {
   #include <stdbool.h>
-  #include <assert.h>
   #include <stdlib.h>
   #include <stdio.h>
   #include <string.h>
   #include <stdint.h>
   #include <zmq.h>
-  #include <czmq.h>
-
+  namespace czmq {
+    using ::byte;
+    #include <czmq.h>
+  }
   #include "raft.h"
   #include "raft_log.h"
   //#include "raft_private.h"
 }
 #include "raft_msgpack.hh"
 
+using namespace czmq;
+
 //#define N() do{fprintf(stderr, "%16s %4d %16s\n", __FILE__, __LINE__, __func__); fflush(stderr);} while(0)
 #define N() {}
-
-
-class ActorData {
-public:
-  raft_node_id_t id_;
-  std::vector<HostData> &hosts_;
-  void *context_;
-  zactor_t *actor_;
-
-  ActorData(raft_node_id_t id, std::vector<HostData> &hosts, void *context) :
-    id_(id), hosts_(hosts), context_(context) {}
-
-  void setup(void (*func)(zsock_t*, void*)) {
-    actor_ = zactor_new(func, this);
-    //printf("new actor_=%lu\n",(unsigned long)actor_);
-    assert(actor_);
-    // sync
-    char *r;
-    zsock_recv(actor_, "s", &r);
-    assert(strcmp(r,"READY")==0);
-    free(r);
-  }
-  void start() {
-    //printf("start actor_=%lu\n",(unsigned long)actor_);
-    const char s[] = "GO";
-    zsock_send(actor_, "s", s);
-  }
-  void destroy() {
-    zactor_destroy(&actor_);
-  }
-};
 
 
 class RequestHandler {
@@ -86,6 +63,28 @@ public:
 };
 
 
+class TxQueue {
+  std::queue<ClientRequest> queue_;
+  std::mutex guard_;
+  std::condition_variable cv_;
+public:
+  void push(ClientRequest val) {
+    std::lock_guard<std::mutex> lock(guard_);
+    queue_.push(std::move(val));
+    cv_.notify_all();
+  }
+  ClientRequest pop() {
+    std::unique_lock<std::mutex> lock(guard_);
+    cv_.wait(lock, [this]{
+      return !queue_.empty();
+    });
+    ClientRequest ret = std::move(queue_.front());
+    queue_.pop();
+    return ret;
+  }
+};
+
+
 class Server {
 public:
   int id_;
@@ -96,9 +95,10 @@ public:
   int timer_id_ = 0;
   std::map<raft_node_id_t,HostData> host_map_;
   std::map<raft_node_id_t,RequestHandler*> request_handler_;
+  TxQueue *tx_queue_;
 
-  Server(void *context, int id) :
-    context_(context), id_(id) {}
+  Server(void *context, int id, TxQueue *tx_queue) :
+    context_(context), id_(id), tx_queue_(tx_queue) {}
 
   ~Server() {
     stop();
@@ -107,9 +107,9 @@ public:
     zloop_destroy(&loop_);
   }
 
-  void setup(std::vector<HostData> &hosts);
+  inline void setup(std::vector<HostData> &hosts);
 
-  void start();
+  inline void start();
 
   void stop() {
     if (timer_id_) {
@@ -136,6 +136,12 @@ public:
 
   RequestHandler *get_request_handler(raft_node_id_t id) {
     return request_handler_[id];
+  }
+
+
+  void enq(ClientRequest &tx)
+  {
+    tx_queue_->push(tx);
   }
 };
 
@@ -264,7 +270,11 @@ static int router_handler(zloop_t *loop, zsock_t *socket, void *udata)
       ClientRequest crq;
       zmq_msgpk_recv(socket, crq);
       if (raft_is_leader(raft)) {
-        Entry ety(raft_get_current_term(raft), ++ety_id, ety_type, crq.command_);
+        if (crq.command_.size() > 0) {
+          sv->enq(crq);
+        }
+        Entry ety(raft_get_current_term(raft), ++ety_id, ety_type,
+          (char*)&(crq.command_[0]), sizeof(Procedure)*crq.command_.size());
         raft_entry_t *mety = ety.restore();
         raft_entry_resp_t metyr;
         rc = raft_recv_entry(raft, mety, &metyr);
@@ -281,7 +291,7 @@ static int router_handler(zloop_t *loop, zsock_t *socket, void *udata)
         if (leader_id >= 0) {
           h = sv->host_map_[leader_id];
         }
-        printf("this_id=%d h.hostname_=%s h.port_=%d h.id_=%d client_id=%d\n",raft_get_nodeid(raft),h.hostname_.c_str(),h.port_,h.id_,id);
+        //printf("this_id=%d h.hostname_=%s h.port_=%d h.id_=%d client_id=%d\n",raft_get_nodeid(raft),h.hostname_.c_str(),h.port_,h.id_,id);
         rc = zmq_msg_send(&msg_id, socket, ZMQ_SNDMORE);
         assert(rc!=-1);
         rc = zmq_msg_send(&msg_null, socket, ZMQ_SNDMORE);
@@ -379,7 +389,7 @@ static int s_timer_event(zloop_t *loop, int timer_id, void *udata)
 }
 
 
-void Server::setup(std::vector<HostData> &hosts) {
+inline void Server::setup(std::vector<HostData> &hosts) {
   // new Raft server
   raft_cbs_t funcs = {
     .send_requestvote = __raft_requestvote,
@@ -415,7 +425,7 @@ void Server::setup(std::vector<HostData> &hosts) {
       for (int i=0; i<5; ++i) {
         rc = zmq_bind(bind_socket_, url.c_str());
         if (rc==0) break;
-        usleep(200000);
+        usleep(100000);
       }
       printf("%d:bind %s\n", id_, url.c_str());
       assert(rc==0);
@@ -449,7 +459,7 @@ void Server::setup(std::vector<HostData> &hosts) {
   //raft_set_last_applied_idx(raft_, 0);
 }
 
-void Server::start() {
+inline void Server::start() {
   //  Create a timer that will be cancelled
   timer_id_ = zloop_timer(loop_, PERIOD_MSEC, 0, s_timer_event, this);
   zloop_start(loop_);

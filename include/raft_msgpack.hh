@@ -8,6 +8,7 @@ extern "C" {
   #include "raft_private.h"
   #include <zmq.h>
 }
+#include "procedurex.hh"
 
 #if 0
 typedef int                raft_entry_id_t;
@@ -51,21 +52,20 @@ public:
   raft_node_id_t   source_node_;
   raft_node_id_t   target_node_;
   long             sequence_num_;
-  std::string      command_;
-  MSGPACK_DEFINE(source_node_,target_node_,command_);
+  std::vector<ProcedureX> command_;
+  MSGPACK_DEFINE(source_node_,target_node_,sequence_num_,command_);
 
   ClientRequest() {}
-  ClientRequest(raft_node_id_t source_node, raft_node_id_t target_node, std::string command) :
-    source_node_(source_node), target_node_(target_node), command_(command) {}
+  ClientRequest(raft_node_id_t source_node, raft_node_id_t target_node, long sequence_num, std::vector<ProcedureX> &command) :
+    source_node_(source_node), target_node_(target_node), sequence_num_(sequence_num), command_(command) {}
   void print_send() {
-    printf("send CR   %d->%d: \"%s\"\n", source_node_, target_node_, command_.c_str());
+    printf("send CR   %d->%d: %ld %zd\n", source_node_, target_node_, sequence_num_, command_.size());
   }
   void print_recv() {
-    printf("recv CR   %d->%d: \"%s\"\n", source_node_, target_node_, command_.c_str());
+    printf("recv CR   %d->%d: %ld %zd\n", source_node_, target_node_, sequence_num_, command_.size());
   }
 };
 
-const int ClientRequest::MSG_TYPE;
 
 class ClientRequestResponse
 {
@@ -74,7 +74,6 @@ public:
   raft_node_id_t   source_node_;
   raft_node_id_t   target_node_;
   int              status_;
-  std::string      leader_hint_;
   MSGPACK_DEFINE(source_node_,target_node_,status_);
 
   ClientRequestResponse() {}
@@ -87,8 +86,6 @@ public:
     printf("recv CRR   %d->%d: status_=%d\n", source_node_, target_node_, status_);
   }
 };
-
-const int ClientRequestResponse::MSG_TYPE;
 
 
 class Entry
@@ -103,6 +100,10 @@ public:
   Entry() {}
   Entry(raft_term_t term, raft_entry_id_t id, short type, std::string data) :
     term_(term), id_(id), type_(type), data_(data) {}
+  Entry(raft_term_t term, raft_entry_id_t id, short type, char *data, size_t data_len) :
+    term_(term), id_(id), type_(type) {
+    data_ = std::string(data, data_len);
+  }
   Entry(raft_entry_t *e) {
     term_ = e->term;
     id_   = e->id;
@@ -121,8 +122,8 @@ public:
     return e;
   }
   void print(int i) {
-    printf(" entries[%d]: term=%ld id=%d type=%hd data=\"%s\"\n",i,
-      term_, id_, type_, data_.c_str());
+    printf(" entries[%d]: term=%ld id=%d type=%hd data=\"%s\" len=%zd\n",i,
+      term_, id_, type_, data_.c_str(), data_.size());
   }
 };
 
@@ -168,8 +169,6 @@ public:
   }
 };
 
-const int EntryResponse::MSG_TYPE;
-
 
 class HostData {
 public:
@@ -209,8 +208,6 @@ public:
     print();
   }
 };
-
-const int HostData::MSG_TYPE;
 
 
 class AppendEntries
@@ -278,8 +275,6 @@ public:
   }
 };
 
-const int AppendEntries::MSG_TYPE;
-
 
 class AppendEntriesResponse
 {
@@ -329,8 +324,6 @@ public:
     print();
   }
 };
-
-const int AppendEntriesResponse::MSG_TYPE;
 
 
 class RequestVote
@@ -383,8 +376,6 @@ public:
   }
 };
 
-const int RequestVote::MSG_TYPE;
-
 
 class RequestVoteResponse
 {
@@ -430,28 +421,38 @@ public:
   }
 };
 
+
+#ifdef GLOBAL_VALUE_DEFINE
+const int RequestVote::MSG_TYPE;
 const int RequestVoteResponse::MSG_TYPE;
+const int AppendEntries::MSG_TYPE;
+const int AppendEntriesResponse::MSG_TYPE;
+const int ClientRequest::MSG_TYPE;
+const int ClientRequestResponse::MSG_TYPE;
+const int EntryResponse::MSG_TYPE;
+const int HostData::MSG_TYPE;
+#endif
 
 
 template <class T>
-  auto print_send(T a) -> decltype(a.print_send())
+  inline auto print_send(T a) -> decltype(a.print_send())
 {
   a.print_send();
 }
-auto print_send(...) -> void
+inline auto print_send(...) -> void
 {}
 
 template <class T>
-  auto print_recv(T a, int more) -> decltype(a.print_recv())
+  inline auto print_recv(T a, int more) -> decltype(a.print_recv())
 {
   if (more) printf("more=%d,",more);
   a.print_recv();
 }
-auto print_recv(...) -> void
+inline auto print_recv(...) -> void
 {}
 
 template <typename T>
-  void zmq_msgpk_send(void* socket, T& data, int flag)
+  inline void zmq_msgpk_send(void* socket, T& data, int flag)
 {
   //print_send(data);
   msgpack::sbuffer packed;
@@ -483,7 +484,7 @@ template <typename T>
  */
 
 template <typename T>
-  auto zmq_msgpk_send_with_type(void* socket, T& data)
+  inline auto zmq_msgpk_send_with_type(void* socket, T& data)
 {
   zmq_msgpk_send(socket, T::MSG_TYPE, ZMQ_SNDMORE);
   print_send(data);
@@ -492,7 +493,7 @@ template <typename T>
 
 
 template <typename T>
-  void zmq_msgpk_recv(void* socket, T& data)
+  inline void zmq_msgpk_recv(void* socket, T& data)
 {
   zmq_msg_t msg;
   int rc;
@@ -514,7 +515,7 @@ template <typename T>
 
 
 template <typename T>
-  void zmq_msgpk_pack(std::deque<msgpack::sbuffer*>& packs, T& data)
+  inline void zmq_msgpk_pack(std::deque<msgpack::sbuffer*>& packs, T& data)
 {
   msgpack::sbuffer *packed = new msgpack::sbuffer;
   msgpack::pack(packed, data);
@@ -522,16 +523,16 @@ template <typename T>
 }
 
 template <typename T>
-  auto zmq_msgpk_pack_with_type(std::deque<msgpack::sbuffer*>& packs, T& data)
+  inline auto zmq_msgpk_pack_with_type(std::deque<msgpack::sbuffer*>& packs, T& data)
 {
   zmq_msgpk_pack(packs, T::MSG_TYPE);
   print_send(data);
   zmq_msgpk_pack(packs, data);
 }
 
-void zmq_msgpk_send_pack(void* socket, std::deque<msgpack::sbuffer*>& packs)
+inline void zmq_msgpk_send_pack(void* socket, std::deque<msgpack::sbuffer*>& packs)
 {
-  printf("packs.size=%zd\n",packs.size());
+  //printf("packs.size=%zd\n",packs.size());
   //if (packs.size()>2) printf("\n\n----\n\n");
   for (size_t i=0; i<2; ++i) {
     int rc, sz;
