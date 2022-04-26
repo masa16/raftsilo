@@ -33,21 +33,23 @@
 #include "../include/zipf.hh"
 
 #include "raft_server.hh"
+#include "raft_cc.hh"
+#include "raft_txn.hh"
 
 //using namespace std;
 
-void worker(size_t thid, const bool &quit, TxQueue *tx_queue) {
+void worker(size_t thid, const bool &quit, RaftCC *raft_cc) {
   Result &myres = std::ref(SiloResult[thid]);
   Xoroshiro128Plus rnd;
   rnd.init();
-  TxnExecutor trans(thid, (Result *) &myres);
+  RaftTxnExecutor trans(thid, (Result *) &myres, raft_cc);
   FastZipf zipf(&rnd, FLAGS_zipf_skew, FLAGS_tuple_num);
   uint64_t epoch_timer_start, epoch_timer_stop;
 #if BACK_OFF
   Backoff backoff(FLAGS_clocks_per_us);
 #endif
 
-#if WAL
+#if 0 //WAL
   /*
   const boost::filesystem::path log_dir_path("/tmp/ccbench");
   if (boost::filesystem::exists(log_dir_path)) {
@@ -90,7 +92,7 @@ void worker(size_t thid, const bool &quit, TxQueue *tx_queue) {
 //                  thid, myres);
 //#endif
 
-    ClientRequest tx = std::move(tx_queue->pop());
+    ClientRequest tx = std::move(raft_cc->tx_queue_.pop());
     std::vector<ProcedureX> pro_set = tx.command_;
     printf("       -------- start transaction --------\n");
 
@@ -109,7 +111,7 @@ RETRY:
 
     if (loadAcquire(quit)) break;
 
-    trans.begin();
+    trans.begin(tx.source_node_, tx.sequence_num_);
     for (auto itr = pro_set.begin(); itr != pro_set.end();
          ++itr) {
       if ((*itr).ope_ == Ope::READ) {
@@ -142,7 +144,7 @@ RETRY:
   return;
 }
 
-extern int raft_test_start(TxQueue *tx_queue);
+//extern int raft_test_start(TxQueue *tx_queue);
 
 int main(int argc, char *argv[]) try {
   gflags::SetUsageMessage("Silo benchmark.");
@@ -155,10 +157,12 @@ int main(int argc, char *argv[]) try {
   initResult();
   //std::vector<char> readys(FLAGS_thread_num);
   std::vector<std::thread> thv;
-  TxQueue tx_queue;
+  //TxQueue tx_queue;
+  RaftCC raft_cc;
   for (size_t i = 0; i < FLAGS_thread_num; ++i)
-    thv.emplace_back(worker, i, std::ref(quit), &tx_queue);
-  raft_test_start(&tx_queue);
+    thv.emplace_back(worker, i, std::ref(quit), &raft_cc);
+  //raft_test_start(&tx_queue);
+  raft_cc.start();
   //waitForReady(readys);
   //storeRelease(start, true);
   for (size_t i = 0; i < FLAGS_extime; ++i) {

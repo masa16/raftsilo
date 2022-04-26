@@ -15,41 +15,14 @@ extern "C" {
 #include "raft_msgpack.hh"
 #include "raft_server.hh"
 #include "raft_client.hh"
+#include "raft_txn.hh"
+#include "raft_cc.hh"
+#include "../third_party/ccbench/silo/include/log.hh"
 
 //#define N() do{fprintf(stderr, "%16s %4d %16s\n", __FILE__, __LINE__, __func__); fflush(stderr);} while(0)
 #define N() {}
 
 
-class ServerData {
-public:
-  raft_node_id_t id_;
-  std::vector<HostData> &hosts_;
-  void *context_;
-  zactor_t *actor_;
-  TxQueue *tx_queue_;
-
-  ServerData(raft_node_id_t id, std::vector<HostData> &hosts, void *context, TxQueue *tx_queue) :
-    id_(id), hosts_(hosts), context_(context), tx_queue_(tx_queue) {}
-
-  void setup(void (*func)(zsock_t*, void*)) {
-    actor_ = zactor_new(func, this);
-    //printf("new actor_=%lu\n",(unsigned long)actor_);
-    assert(actor_);
-    // sync
-    char *r;
-    zsock_recv(actor_, "s", &r);
-    assert(strcmp(r,"READY")==0);
-    free(r);
-  }
-  void start() {
-    //printf("start actor_=%lu\n",(unsigned long)actor_);
-    const char s[] = "GO";
-    zsock_send(actor_, "s", s);
-  }
-  void destroy() {
-    zactor_destroy(&actor_);
-  }
-};
 
 
 static void server_thread(zsock_t *pipe, void *udata)
@@ -59,6 +32,7 @@ static void server_thread(zsock_t *pipe, void *udata)
   //printf("a->id_=%d\n",a->id_);
   Server sv(a->context_, a->id_, a->tx_queue_);
   sv.setup(a->hosts_);
+  a->raft_ = sv.raft_;
   // synchronize
   const char s[] = "READY";
   zsock_send(pipe, "s", s);
@@ -66,7 +40,7 @@ static void server_thread(zsock_t *pipe, void *udata)
   zsock_recv(pipe, "s", &r);
   assert(strcmp(r,"GO")==0);
   free(r);
-  sv.start();
+  sv.start(pipe);
 }
 
 
@@ -105,39 +79,51 @@ static void client_thread(zsock_t *pipe, void *udata)
 
 #define NSERVERS 5
 
-int raft_test_start(TxQueue *tx_queue)
+int RaftCC::start()
 {
   int rc;
-  void *context = zmq_ctx_new();
-  assert(context);
-  std::vector<HostData> hosts;
-  std::vector<ServerData*> actors;
+  context_ = zmq_ctx_new();
+  assert(context_);
 
   for (int i=1; i<=NSERVERS; i++) {
-    hosts.emplace_back(i,"localhost",51110+i);
+    hosts_.emplace_back(i,"localhost",51110+i);
   }
-  for (auto h : hosts) {
-    ServerData *a = new ServerData(h.id_, hosts, context, tx_queue);
-    actors.emplace_back(a);
+  for (auto h : hosts_) {
+    ServerData *sv = new ServerData(h.id_, hosts_, context_, &tx_queue_);
+    servers_.emplace_back(sv);
   }
-  for (auto a : actors) {
-    a->setup(server_thread);
+  for (auto sv : servers_) {
+    sv->setup(server_thread);
+    actors_[sv->id_] = sv->actor_;
   }
-  for (auto a : actors) {
-    a->start();
+  for (auto sv : servers_) {
+    sv->start();
   }
 
-  ClientData *cdata = new ClientData(context, hosts[0], 8);
+  ClientData *cdata = new ClientData(context_, hosts_[0], 8);
   zactor_t *c = zactor_new(client_thread, cdata);
 
   zactor_destroy(&c);
-  for (auto a : actors) {
-    a->destroy();
-    delete a;
+  for (auto sv : servers_) {
+    sv->destroy();
+    delete sv;
   }
   delete cdata;
 
-  rc = zmq_ctx_term(context);
+  rc = zmq_ctx_term(context_);
   assert(rc==0);
   return 0;
+}
+
+
+void RaftCC::send_log(int client_id, long sequence_num, std::uint64_t tid, //NotificationId &nid,
+  std::vector<LogRecord> &log_set)
+{
+  raft_node_id_t leader_id = raft_get_leader_id(servers_[0]->raft_);
+  assert(leader_id>=0);
+  zactor_t *a = actors_[leader_id];
+  int rc = zsock_send(a, "i88b", client_id, (uint64_t)sequence_num, tid,
+    //&nid, sizeof(NotificationId),
+    &log_set[0], log_set.size()*sizeof(LogRecord));
+  assert(rc>0);
 }

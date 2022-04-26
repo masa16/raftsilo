@@ -62,13 +62,15 @@ file(GLOB SILO_SOURCES
   ../third_party/ccbench/silo/result.cc
   ../third_party/ccbench/silo/transaction.cc
   ../third_party/ccbench/silo/util.cc
-  raft_test.cc
-  raftsilo.cc
+  raft_server.cc
+  raft_cc.cc
+  raft_txn.cc
+  raft_silo.cc
   )
 
-add_executable(silo.exe ${SILO_SOURCES})
+add_executable(raft_silo ${SILO_SOURCES})
 
-target_include_directories(silo.exe
+target_include_directories(raft_silo
   PUBLIC ../include
   PUBLIC ../third_party/raft/include
   PUBLIC ../third_party/ccbench/silo
@@ -77,7 +79,7 @@ target_include_directories(silo.exe
   PUBLIC ${CZeroMQ_INCLUDE_DIR}
   )
 
-target_link_libraries(silo.exe
+target_link_libraries(raft_silo
   PUBLIC Boost::filesystem
   PUBLIC gflags::gflags
   ${PROJECT_SOURCE_DIR}/../third_party/ccbench/third_party/mimalloc/out/release/libmimalloc.a
@@ -152,5 +154,5 @@ endif ()
 if (DEFINED WAL)
   add_definitions(-DWAL=${WAL})
 else ()
-  add_definitions(-DWAL=0)
+  add_definitions(-DWAL=1)
 endif ()

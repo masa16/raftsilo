@@ -74,6 +74,7 @@ public:
   raft_node_id_t   source_node_;
   raft_node_id_t   target_node_;
   int              status_;
+  int              n_received_ = 0;
   MSGPACK_DEFINE(source_node_,target_node_,status_);
 
   ClientRequestResponse() {}

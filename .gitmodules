@@ -4,4 +4,5 @@
         ignore = dirty
 [submodule "third_party/ccbench"]
 	path = third_party/ccbench
-	url = https://github.com/thawk105/ccbench.git
+	url = https://github.com/masa16/ccbench.git
+        ignore = dirty
