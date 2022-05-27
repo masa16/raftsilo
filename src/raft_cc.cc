@@ -106,7 +106,7 @@ int RaftCC::start()
   zactor_destroy(&c);
   for (auto sv : servers_) {
     sv->destroy();
-    delete sv;
+    //delete sv;
   }
   delete cdata;
 

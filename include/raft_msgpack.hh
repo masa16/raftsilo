@@ -19,6 +19,8 @@ typedef int                raft_node_id_t;
 typedef unsigned long      raft_msg_id_t;
 #endif
 
+#define ZERR(b) do{if(b){fprintf(stderr,"%16s %4d %16s: ZMQ error: %s\n",__FILE__,__LINE__,__func__,zmq_strerror(zmq_errno()));abort();}}while(0)
+
 typedef enum {
   RAFT_MSG_REQUESTVOTE,
   RAFT_MSG_REQUESTVOTE_RESPONSE,
@@ -35,7 +37,6 @@ typedef enum {
 static char _state_char(raft_server_t *raft)
 {
   switch(raft_get_state(raft)) {
-  //case RAFT_STATE_NONE: return 'N';
   case RAFT_STATE_FOLLOWER: return 'F';
   case RAFT_STATE_PRECANDIDATE: return 'P';
   case RAFT_STATE_CANDIDATE: return 'C';
@@ -59,10 +60,10 @@ public:
   ClientRequest(raft_node_id_t source_node, raft_node_id_t target_node, long sequence_num, std::vector<ProcedureX> &command) :
     source_node_(source_node), target_node_(target_node), sequence_num_(sequence_num), command_(command) {}
   void print_send() {
-    printf("send CR   %d->%d: %ld %zd\n", source_node_, target_node_, sequence_num_, command_.size());
+    printf("send CR  %d->%d: %ld %zd\n", source_node_, target_node_, sequence_num_, command_.size());
   }
   void print_recv() {
-    printf("recv CR   %d->%d: %ld %zd\n", source_node_, target_node_, sequence_num_, command_.size());
+    printf("recv CR  %d->%d: %ld %zd\n", source_node_, target_node_, sequence_num_, command_.size());
   }
 };
 
@@ -81,10 +82,10 @@ public:
   ClientRequestResponse(raft_node_id_t source_node, raft_node_id_t target_node, int status) :
     source_node_(source_node), target_node_(target_node), status_(status) {}
   void print_send() {
-    printf("send CRR   %d->%d: status_=%d\n", source_node_, target_node_, status_);
+    printf("send CRR %d->%d: status_=%d\n", source_node_, target_node_, status_);
   }
   void print_recv() {
-    printf("recv CRR   %d->%d: status_=%d\n", source_node_, target_node_, status_);
+    printf("recv CRR %d->%d: status_=%d\n", source_node_, target_node_, status_);
   }
 };
 
@@ -469,8 +470,7 @@ template <typename T>
   sz = zmq_msg_size(&msg);
   rc = zmq_msg_send(&msg, socket, flag);
   //printf("rc=%d zmq_msg_size(&msg)=%d flag=%d socket=%p\n",rc,sz,flag,socket);
-  if (rc==-1) {fprintf(stderr,"zmq_msgpk_send: %s\n",zmq_strerror(zmq_errno()));}
-    //fprintf(stderr,"zmq_errno=%d - ",zmq_errno());perror("zmq_msgpk_send");}
+  ZERR(rc==-1);
   if (flag==0) assert(rc==sz);
 }
 
@@ -547,8 +547,7 @@ inline void zmq_msgpk_send_pack(void* socket, std::deque<msgpack::sbuffer*>& pac
     sz = zmq_msg_size(&msg);
     rc = zmq_msg_send(&msg, socket, flag);
     //printf("rc=%d zmq_msg_size(&msg)=%d flag=%d socket=%p\n",rc,sz,flag,socket);
-    if (rc==-1) {fprintf(stderr,"zmq_msgpk_send: %s\n",zmq_strerror(zmq_errno()));}
-    //fprintf(stderr,"zmq_errno=%d - ",zmq_errno());perror("zmq_msgpk_send");}
+    ZERR(rc==-1);
     if (flag==0) assert(rc==sz);
     delete packed;
   }

@@ -34,7 +34,7 @@ public:
     server_(sv), raft_(raft), id_(id), socket_(socket) {}
 
   ~RequestHandler() {
-    for (auto packed : packs_) delete packed;
+    //for (auto packed : packs_) delete packed;
     zmq_close(socket_);
   }
 
@@ -77,8 +77,8 @@ public:
 
   ~Server() {
     stop();
-    for (auto x : request_handler_) delete x.second;
-    request_handler_.clear();
+    //for (auto x : request_handler_) delete x.second;
+    //request_handler_.clear();
     zloop_destroy(&loop_);
   }
 

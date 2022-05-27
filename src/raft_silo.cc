@@ -94,7 +94,6 @@ void worker(size_t thid, const bool &quit, RaftCC *raft_cc) {
 
     ClientRequest tx = std::move(raft_cc->tx_queue_.pop());
     std::vector<ProcedureX> pro_set = tx.command_;
-    printf("       -------- start transaction --------\n");
 
 #if PROCEDURE_SORT
     sort(pro_set.begin(), pro_set.end());
@@ -140,8 +139,12 @@ RETRY:
       goto RETRY;
     }
   }
-
+  printf("thid=%zd end\n",thid);
   return;
+}
+
+void raft_thread(RaftCC *raft_cc) {
+  raft_cc->start();
 }
 
 //extern int raft_test_start(TxQueue *tx_queue);
@@ -162,6 +165,7 @@ int main(int argc, char *argv[]) try {
   for (size_t i = 0; i < FLAGS_thread_num; ++i)
     thv.emplace_back(worker, i, std::ref(quit), &raft_cc);
   //raft_test_start(&tx_queue);
+  //std::thread rth(raft_thread, &raft_cc);
   raft_cc.start();
   //waitForReady(readys);
   //storeRelease(start, true);
@@ -169,6 +173,7 @@ int main(int argc, char *argv[]) try {
     sleepMs(1000);
   }
   storeRelease(quit, true);
+  printf("quit\n");
   for (auto &th : thv) th.join();
 
   for (unsigned int i = 0; i < FLAGS_thread_num; ++i) {

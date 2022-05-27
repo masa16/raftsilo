@@ -30,9 +30,9 @@ void send_header(zsock_t *socket, raft_node_id_t id)
   zmq_msg_t msg;
   int rc;
   rc = zmq_msg_init_size(&msg, 0);
-  assert(rc==0);
+  ZERR(rc!=0);
   rc = zmq_msg_send(&msg, socket, ZMQ_SNDMORE);
-  assert(rc!=-1);
+  ZERR(rc==-1);
 }
 
 
@@ -108,11 +108,11 @@ static int router_handler(zloop_t *loop, zsock_t *socket, void *udata)
   zmq_msg_t msg_id;
   int rc, more;
   rc = zmq_msg_init(&msg_id);
-  assert(rc==0);
+  ZERR(rc!=0);
   rc = zmq_msg_recv(&msg_id, socket, 0);
-  assert(rc!=-1);
+  ZERR(rc==-1);
   len = zmq_msg_size(&msg_id);
-
+  ZERR(rc==-1);
   msgpack::object_handle hd = msgpack::unpack(static_cast<char*>(zmq_msg_data(&msg_id)), len);
   hd.get().convert(id);
 
@@ -123,16 +123,16 @@ static int router_handler(zloop_t *loop, zsock_t *socket, void *udata)
   // receive empty delimiter frame
   zmq_msg_t msg_null;
   rc = zmq_msg_init(&msg_null);
-  assert(rc==0);
+  ZERR(rc!=0);
   rc = zmq_msg_recv(&msg_null, socket, 0);
-  assert(rc!=-1);
+  ZERR(rc==-1);
   len = zmq_msg_size(&msg_null);
   if (len!=0) {
     zmq_msg_t msg;
     rc = zmq_msg_init(&msg);
-    assert(rc==0);
+    ZERR(rc!=0);
     rc = zmq_msg_recv(&msg, socket, 0);
-    assert(rc!=-1);
+    ZERR(rc==-1);
     size_t next_len = zmq_msg_size(&msg);
     printf("delimiter: len=%zd id=%d this_id=%d next_len=%zd\n",len,id,raft_get_nodeid(raft),next_len);
   }
@@ -154,9 +154,9 @@ static int router_handler(zloop_t *loop, zsock_t *socket, void *udata)
       raft_requestvote_resp_t mrvr;
       raft_recv_requestvote(raft, raft_get_node(raft, id), &mrv, &mrvr);
       rc = zmq_msg_send(&msg_id, socket, ZMQ_SNDMORE);
-      assert(rc!=-1);
+      ZERR(rc==-1);
       rc = zmq_msg_send(&msg_null, socket, ZMQ_SNDMORE);
-      assert(rc!=-1);
+      ZERR(rc==-1);
       RequestVoteResponse rvr(raft, raft_get_node(raft, id), mrvr);
       zmq_msgpk_send_with_type(socket, rvr);
       break;
@@ -170,9 +170,9 @@ static int router_handler(zloop_t *loop, zsock_t *socket, void *udata)
       raft_appendentries_resp_t maer;
       raft_recv_appendentries(raft, raft_get_node(raft, id), &mae, &maer);
       rc = zmq_msg_send(&msg_id, socket, ZMQ_SNDMORE);
-      assert(rc!=-1);
+      ZERR(rc==-1);
       rc = zmq_msg_send(&msg_null, socket, ZMQ_SNDMORE);
-      assert(rc!=-1);
+      ZERR(rc==-1);
       AppendEntriesResponse aer(raft, raft_get_node(raft, id), maer);
       zmq_msgpk_send_with_type(socket, aer);
       break;
@@ -191,9 +191,9 @@ static int router_handler(zloop_t *loop, zsock_t *socket, void *udata)
         }
         //printf("this_id=%d h.hostname_=%s h.port_=%d h.id_=%d client_id=%d\n",raft_get_nodeid(raft),h.hostname_.c_str(),h.port_,h.id_,id);
         rc = zmq_msg_send(&msg_id, socket, ZMQ_SNDMORE);
-        assert(rc!=-1);
+        ZERR(rc==-1);
         rc = zmq_msg_send(&msg_null, socket, ZMQ_SNDMORE);
-        assert(rc!=-1);
+        ZERR(rc==-1);
         zmq_msgpk_send_with_type(socket, h);
       }
       break;
@@ -321,7 +321,7 @@ void Server::setup(std::vector<HostData> &hosts) {
       assert(bind_socket_);
       int mandatory=1;
       rc = zmq_setsockopt(bind_socket_, ZMQ_ROUTER_MANDATORY, &mandatory, sizeof(int));
-      assert(rc==0);
+      ZERR(rc!=0);
       std::string url = h.bind_url();
       for (int i=0; i<5; ++i) {
         rc = zmq_bind(bind_socket_, url.c_str());
@@ -329,7 +329,7 @@ void Server::setup(std::vector<HostData> &hosts) {
         usleep(100000);
       }
       printf("%d:bind %s\n", id_, url.c_str());
-      assert(rc==0);
+      ZERR(rc!=0);
       zloop_reader(loop_, bind_socket_, router_handler, this);
     } else {
       raft_add_node(raft_, NULL, id, 0);
@@ -337,10 +337,10 @@ void Server::setup(std::vector<HostData> &hosts) {
       msgpack::sbuffer packed;
       msgpack::pack(&packed, id_);
       rc = zmq_setsockopt(sock, ZMQ_IDENTITY, packed.data(), packed.size());
-      assert(rc==0);
+      ZERR(rc!=0);
       std::string url = h.connect_url();
       rc = zmq_connect(sock, url.c_str());
-      assert(rc==0);
+      ZERR(rc!=0);
       printf("%d:connect to %d: %s\n", id_, id, url.c_str());
       //add_socket(id, sock);
       zloop_reader(loop_, sock, request_handler, new_request_handler(id,sock));

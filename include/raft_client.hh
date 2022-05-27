@@ -46,7 +46,6 @@ public:
     stop();
   }
 
-  void start();
   void connect();
   void reconnect(HostData &server);
   void send(std::vector<ProcedureX> &data);
@@ -127,6 +126,7 @@ inline static void makeProcedureX(std::vector <ProcedureX> &pro, Xoroshiro128Plu
 
 static int client_handler(zloop_t *loop, zsock_t *socket, void *udata)
 {N();
+  static int count=0;
   Client *c = (Client*)udata;
   assert(c->socket_==socket);
 
@@ -182,14 +182,15 @@ static int client_handler(zloop_t *loop, zsock_t *socket, void *udata)
     abort();
   }
 
-  int thid=0;
+  int thid = c->id_;
   makeProcedureX(c->pro_set_, c->rnd_, *(c->zipf_), FLAGS_tuple_num, FLAGS_max_ope,
     FLAGS_thread_num, FLAGS_rratio, FLAGS_rmw, FLAGS_ycsb, false,
     thid, c->result_);
 
   // send next data
   c->send(c->pro_set_);
-  return 0;
+  if (c->sequence_num_%100==0) {printf("client id=%d seq_num=%ld\n", c->id_, c->sequence_num_);}
+  return (c->sequence_num_==200) ? -1 : 0;
 }
 
 void Client::connect()
