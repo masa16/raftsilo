@@ -5,7 +5,7 @@ project(ccbench_silo
         DESCRIPTION "silo of ccbench"
         LANGUAGES CXX)
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/../third_party/ccbench/cmake)
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/third_party/ccbench/cmake)
 
 option(ENABLE_SANITIZER "enable sanitizer on debug build" ON)
 option(ENABLE_UB_SANITIZER "enable undefined behavior sanitizer on debug build" OFF)
@@ -57,24 +57,24 @@ include(CMakePackageConfigHelpers)
 include(CompileOptions)
 
 file(GLOB SILO_SOURCES
-  ../third_party/ccbench/common/result.cc
-  ../third_party/ccbench/common/util.cc
-  ../third_party/ccbench/silo/result.cc
-  ../third_party/ccbench/silo/transaction.cc
-  ../third_party/ccbench/silo/util.cc
-  raft_server.cc
-  raft_cc.cc
-  raft_txn.cc
-  raft_silo.cc
+  third_party/ccbench/common/result.cc
+  third_party/ccbench/common/util.cc
+  third_party/ccbench/silo/result.cc
+  third_party/ccbench/silo/transaction.cc
+  third_party/ccbench/silo/util.cc
+  src/raft_server.cc
+  src/raft_cc.cc
+  src/raft_txn.cc
+  src/raft_silo.cc
   )
 
 add_executable(raft_silo ${SILO_SOURCES})
 
 target_include_directories(raft_silo
-  PUBLIC ../include
-  PUBLIC ../third_party/raft/include
-  PUBLIC ../third_party/ccbench/silo
-  PUBLIC ../third_party/ccbench/include
+  PUBLIC include
+  PUBLIC third_party/raft/include
+  PUBLIC third_party/ccbench/silo
+  PUBLIC third_party/ccbench/include
   PUBLIC ${ZeroMQ_INCLUDE_DIR}
   PUBLIC ${CZeroMQ_INCLUDE_DIR}
   )
@@ -82,9 +82,9 @@ target_include_directories(raft_silo
 target_link_libraries(raft_silo
   PUBLIC Boost::filesystem
   PUBLIC gflags::gflags
-  ${PROJECT_SOURCE_DIR}/../third_party/ccbench/third_party/mimalloc/out/release/libmimalloc.a
-  ${PROJECT_SOURCE_DIR}/../third_party/ccbench/third_party/masstree/libkohler_masstree_json.a
-  ${PROJECT_SOURCE_DIR}/../third_party/raft/build/libraft.a
+  ${PROJECT_SOURCE_DIR}/third_party/ccbench/third_party/mimalloc/out/release/libmimalloc.a
+  ${PROJECT_SOURCE_DIR}/third_party/ccbench/third_party/masstree/libkohler_masstree_json.a
+  ${PROJECT_SOURCE_DIR}/third_party/raft/build/libraft.a
   PUBLIC Threads::Threads
   PUBLIC msgpackc
   PUBLIC ${ZeroMQ_LIBRARY}
