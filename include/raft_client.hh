@@ -11,10 +11,10 @@ extern "C" {
 }
 #include "raft_msgpack.hh"
 #include "procedurex.hh"
-#include "random.hh"
-#include "result.hh"
-#include "tsc.hh"
-#include "zipf.hh"
+#include "../include/random.hh"
+#include "../include/result.hh"
+#include "../include/tsc.hh"
+#include "../include/zipf.hh"
 #include "include/util.hh"
 #include "include/common.hh"
 

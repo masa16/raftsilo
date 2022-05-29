@@ -2,18 +2,22 @@
 #include <algorithm>
 #include <string>
 
-#include "../third_party/ccbench/silo/include/atomic_tool.hh"
-#include "../third_party/ccbench/silo/include/log.hh"
+#include "include/atomic_tool.hh"
+#include "include/log.hh"
 //#if DURABLE_EPOCH
-#include "../third_party/ccbench/silo/include/util.hh"
+#include "include/util.hh"
 //#endif
-#include "../third_party/ccbench/silo/include/transaction.hh"
+//#include "include/transaction_lg.hh"
 #include "raft_txn.hh"
 //#include "include/notifier.hh"
-
+//#include "include/notifier.hh"
 
 void RaftTxnExecutor::begin(int client_id, long sequence_num) {
+#if DURABLE_EPOCH
+  TxnExecutorLg::begin();
+#else
   TxnExecutor::begin();
+#endif
   //nid_ = NotificationId(, thid_, rdtscp());
   client_id_ = client_id;
   sequence_num_ = sequence_num;
@@ -31,7 +35,9 @@ void RaftTxnExecutor::wal(std::uint64_t ctid) {
     //latest_log_header_.chkSum_ += log.computeChkSum();
     //++latest_log_header_.logRecNum_;
   }
-  //log_buffer_pool_.push(ctid, nid_, write_set_, write_val_, new_epoch_begins);
+#if DURABLE_EPOCH
+  log_buffer_pool_.push(ctid, nid_, write_set_, write_val_, new_epoch_begins);
+#endif
   raft_cc_->send_log(client_id_, sequence_num_, ctid, log_set_);
   log_set_.clear();
 

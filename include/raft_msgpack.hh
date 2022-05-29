@@ -10,6 +10,8 @@ extern "C" {
 }
 #include "procedurex.hh"
 
+#define TRACE 1
+
 #if 0
 typedef int                raft_entry_id_t;
 typedef long int           raft_term_t;
@@ -488,7 +490,9 @@ template <typename T>
   inline auto zmq_msgpk_send_with_type(void* socket, T& data)
 {
   zmq_msgpk_send(socket, T::MSG_TYPE, ZMQ_SNDMORE);
+  #if TRACE
   print_send(data);
+  #endif
   zmq_msgpk_send(socket, data, 0);
 }
 
@@ -509,7 +513,9 @@ template <typename T>
   msgpack::object_handle hd = msgpack::unpack(static_cast<char*>(zmq_msg_data(&msg)), len);
   hd.get().convert(data);
   int more = zmq_msg_more(&msg);
+  #if TRACE
   print_recv(data,more);
+  #endif
   rc = zmq_msg_close(&msg);
   assert(rc==0);
 }
@@ -527,7 +533,9 @@ template <typename T>
   inline auto zmq_msgpk_pack_with_type(std::deque<msgpack::sbuffer*>& packs, T& data)
 {
   zmq_msgpk_pack(packs, T::MSG_TYPE);
+  #if TRACE
   print_send(data);
+  #endif
   zmq_msgpk_pack(packs, data);
 }
 

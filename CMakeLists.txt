@@ -56,25 +56,53 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include(CompileOptions)
 
-file(GLOB SILO_SOURCES
-  third_party/ccbench/common/result.cc
-  third_party/ccbench/common/util.cc
-  third_party/ccbench/silo/result.cc
-  third_party/ccbench/silo/transaction.cc
-  third_party/ccbench/silo/util.cc
-  src/raft_server.cc
-  src/raft_cc.cc
-  src/raft_txn.cc
-  src/raft_silo.cc
-  )
+if (DEFINED DURABLE_EPOCH)
+    add_definitions(-DDURABLE_EPOCH=${DURABLE_EPOCH})
+else ()
+    add_definitions(-DDURABLE_EPOCH=1)
+    set(DURABLE_EPOCH 1)
+endif ()
+
+if (${DURABLE_EPOCH} EQUAL 0)
+  file(GLOB SILO_SOURCES
+    src/raft_server.cc
+    src/raft_cc.cc
+    src/raft_txn.cc
+    src/raft_silo.cc
+    third_party/ccbench/common/result.cc
+    third_party/ccbench/common/util.cc
+    third_party/ccbench/silo/util.cc
+    third_party/ccbench/silo/transaction.cc
+    third_party/ccbench/silo/result.cc
+    )
+else ()
+  file(GLOB SILO_SOURCES
+    src/raft_server.cc
+    src/raft_cc.cc
+    src/raft_txn.cc
+    src/raft_silo.cc
+    third_party/ccbench/common/result.cc
+    third_party/ccbench/common/util.cc
+    third_party/ccbench/silo/util.cc
+    third_party/ccbench/silo/transaction.cc
+    third_party/ccbench/silo_logging/silo_result.cc
+    third_party/ccbench/silo_logging/transaction_lg.cc
+    third_party/ccbench/silo_logging/util_lg.cc
+    third_party/ccbench/silo_logging/log_buffer.cc
+    third_party/ccbench/silo_logging/logger.cc
+    third_party/ccbench/silo_logging/notifier.cc
+    third_party/ccbench/silo_logging/result_lg.cc
+    )
+endif ()
 
 add_executable(raft_silo ${SILO_SOURCES})
 
 target_include_directories(raft_silo
   PUBLIC include
   PUBLIC third_party/raft/include
+  PUBLIC third_party/ccbench/silo_logging
   PUBLIC third_party/ccbench/silo
-  PUBLIC third_party/ccbench/include
+  #PUBLIC third_party/ccbench/include
   PUBLIC ${ZeroMQ_INCLUDE_DIR}
   PUBLIC ${CZeroMQ_INCLUDE_DIR}
   )
@@ -89,6 +117,8 @@ target_link_libraries(raft_silo
   PUBLIC msgpackc
   PUBLIC ${ZeroMQ_LIBRARY}
   PUBLIC ${CZeroMQ_LIBRARY}
+  PUBLIC numa
+  #PUBLIC pmem
   )
 
 if (DEFINED ADD_ANALYSIS)
@@ -155,4 +185,10 @@ if (DEFINED WAL)
   add_definitions(-DWAL=${WAL})
 else ()
   add_definitions(-DWAL=1)
+endif ()
+
+if (DEFINED LOG_WRITER)
+    add_definitions(-DLOG_WRITER=${LOG_WRITER})
+else ()
+    add_definitions(-DLOG_WRITER=0)
 endif ()
