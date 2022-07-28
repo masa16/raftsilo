@@ -299,10 +299,10 @@ public:
     term_(term),
     success_(success),
     current_idx_(current_idx) {}
-  AppendEntriesResponse(raft_server_t *raft, raft_node_t *raft_node, raft_appendentries_resp_t &m) {
+  AppendEntriesResponse(raft_server_t *raft, raft_node_id_t node_id, raft_appendentries_resp_t &m) {
     raft_ = raft;
     source_node_ = raft_get_nodeid(raft);
-    target_node_ = raft_node_get_id(raft_node);
+    target_node_ = node_id;
     msg_id_      = m.msg_id;
     term_        = m.term;
     success_     = m.success;
