@@ -169,12 +169,19 @@ static int router_handler(zloop_t *loop, zsock_t *socket, void *udata)
       ae.restore(mae);
       raft_appendentries_resp_t maer;
       raft_recv_appendentries(raft, raft_get_node(raft, id), &mae, &maer);
-      rc = zmq_msg_send(&msg_id, socket, ZMQ_SNDMORE);
-      ZERR(rc==-1);
-      rc = zmq_msg_send(&msg_null, socket, ZMQ_SNDMORE);
-      ZERR(rc==-1);
-      AppendEntriesResponse aer(raft, raft_get_node(raft, id), maer);
-      zmq_msgpk_send_with_type(socket, aer);
+      if (!maer.success) {
+        int rc;
+        rc = zmq_msg_send(&msg_id, socket, ZMQ_SNDMORE);
+        ZERR(rc==-1);
+        rc = zmq_msg_send(&msg_null, socket, ZMQ_SNDMORE);
+        ZERR(rc==-1);
+        AppendEntriesResponse aer(raft, id, maer);
+        zmq_msgpk_send_with_type(socket, aer);
+      } else {
+        sv->ap_resp_vec_.emplace_back(id, maer);
+        zmq_msg_close(&msg_id);
+        zmq_msg_close(&msg_null);
+      }
       break;
     }
   case RAFT_MSG_CLIENTREQUEST:
@@ -241,8 +248,64 @@ static int __raft_persist_vote(raft_server_t* raft, void *udata, int vote)
   return 0;
 }
 
-static int __raft_applylog(raft_server_t* raft, void *udata, raft_entry_t *ety, raft_index_t idx)
+void Server::applylog(raft_entry_t *entry, raft_index_t idx)
 {
+  Entry ety(ety);
+  size_t ety_size = ety.data_.size();
+  if (buffer_tail_ + ety_size > max_buffer_size_) {
+    // write log
+    logfile_.write(buffer_data_, ety_size);
+    buffer_tail_ = 0;
+
+    // send AppendEntriesResponse
+    //for (auto itr = ap_resp_vec_.begin(); itr != ap_resp_vec_.end(); ++itr) {
+      for (auto [id,maer] : ap_resp_vec_) {
+      //int id = a.first;
+      //raft_appendentries_resp_t &maer = a.second;
+        //int id = itr->first;
+        //raft_appendentries_resp_t *maer = &(itr->second);
+
+      msgpack::sbuffer packed;
+      msgpack::pack(&packed, id);
+      int rc, sz;
+      zmq_msg_t msg_id;
+      rc = zmq_msg_init_size(&msg_id, packed.size());
+      assert(rc==0);
+      std::memcpy(zmq_msg_data(&msg_id), packed.data(), packed.size());
+      sz = zmq_msg_size(&msg_id);
+      rc = zmq_msg_send(&msg_id, bind_socket_, ZMQ_SNDMORE);
+      ZERR(rc==-1);
+      assert(rc==sz);
+
+      zmq_msg_t msg_null;
+      rc = zmq_msg_init_size(&msg_null, 0);
+      assert(rc == 0);
+      rc = zmq_msg_send(&msg_null, bind_socket_, ZMQ_SNDMORE);
+      assert(rc == 0);
+
+      AppendEntriesResponse aer(raft_, id, maer);
+      zmq_msgpk_send_with_type(bind_socket_, aer);
+    }
+    ap_resp_vec_.clear();
+  }
+  // append log to buffer
+  memcpy(buffer_data_ + buffer_tail_, ety.data_.data(), ety_size);
+  buffer_tail_ += ety_size;
+}
+
+static int __raft_applylog(raft_server_t* raft, void *udata, raft_entry_t *entry, raft_index_t idx)
+{
+  Server *sv = (Server*)udata;
+  switch (entry->type) {
+  case RAFT_LOGTYPE_NORMAL:
+    sv->applylog(entry, idx);
+    break;
+  case RAFT_LOGTYPE_ADD_NONVOTING_NODE:
+  case RAFT_LOGTYPE_ADD_NODE:
+  case RAFT_LOGTYPE_REMOVE_NODE:
+  default:
+    break;
+  }
   return 0;
 }
 
@@ -347,6 +410,27 @@ void Server::setup(std::vector<HostData> &hosts) {
     }
   }
 
+  // log file
+  logdir_ = "raft" + std::to_string(id_);
+  struct stat statbuf;
+  if (::stat(logdir_.c_str(), &statbuf)) {
+    if (::mkdir(logdir_.c_str(), 0755)) {
+      perror("mkdir error");
+      abort();
+    }
+  } else {
+    if ((statbuf.st_mode & S_IFMT) != S_IFDIR) {
+      perror("not directory");
+      abort();
+    }
+  }
+  logpath_ = logdir_ + "/data.log";
+  logfile_.open(logpath_);
+
+  // buffer
+  buffer_data_ = (std::byte*)::malloc(max_buffer_size_);
+  buffer_tail_ = 0;
+
   /* candidate to leader */
   //if (a->id_==0) {
   //  raft_set_state(raft_, RAFT_STATE_CANDIDATE);
@@ -365,7 +449,7 @@ void Server::setup(std::vector<HostData> &hosts) {
 static int pipe_handler(zloop_t *loop, zsock_t *pipe, void *udata)
 {N();
   static raft_entry_id_t ety_id = 0;
-  static short ety_type = 255;
+  static short ety_type = RAFT_LOGTYPE_NORMAL;
   int client_id;
   uint64_t sequence_num;
   uint64_t tid;

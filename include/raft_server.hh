@@ -15,6 +15,7 @@ using namespace czmq;
 #include "raft_msgpack.hh"
 #include "raft_cc.hh"
 #include "tx_queue.hh"
+#include "include/log_writer.hh"
 
 //#define N() do{fprintf(stderr, "%16s %4d %16s\n", __FILE__, __LINE__, __func__); fflush(stderr);} while(0)
 #define N() {}
@@ -71,6 +72,13 @@ public:
   TxQueue *tx_queue_;
   std::map<raft_entry_id_t,ClientRequestResponse*> waiting_response_;
   std::multimap<raft_msg_id_t,raft_entry_id_t> id_map_;
+  PosixWriter logfile_;
+  std::string logdir_;
+  std::string logpath_;
+  std::byte *buffer_data_;
+  size_t buffer_tail_ = 0;
+  size_t max_buffer_size_ = 512; //*1024;
+  std::vector<std::pair<raft_node_id_t,raft_appendentries_resp_t>> ap_resp_vec_;
 
   Server(void *context, int id, TxQueue *tx_queue) :
     context_(context), id_(id), tx_queue_(tx_queue) {}
@@ -86,6 +94,7 @@ public:
   void start(zsock_t *pipe);
   void stop();
   void send_response_to_clinet(raft_msg_id_t msg_id);
+  void applylog(raft_entry_t *entry, raft_index_t idx);
 
   RequestHandler *new_request_handler(raft_node_id_t id, zsock_t *sock) {
     RequestHandler *m = new RequestHandler(this, raft_, id, sock);
