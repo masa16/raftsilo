@@ -38,7 +38,7 @@ void RaftTxnExecutor::wal(std::uint64_t ctid) {
 #if DURABLE_EPOCH
   log_buffer_pool_.push(ctid, nid_, write_set_, write_val_, new_epoch_begins);
 #endif
-  raft_cc_->send_log(client_id_, sequence_num_, ctid, log_set_);
+  //raft_cc_->send_log(client_id_, sequence_num_, ctid, log_set_, thid_);
   log_set_.clear();
 
   if (new_epoch_begins) {

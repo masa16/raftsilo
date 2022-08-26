@@ -10,7 +10,7 @@ extern "C" {
 }
 #include "procedurex.hh"
 
-#define TRACE 1
+#define TRACE 0
 
 #if 0
 typedef int                raft_entry_id_t;
@@ -21,7 +21,7 @@ typedef int                raft_node_id_t;
 typedef unsigned long      raft_msg_id_t;
 #endif
 
-#define ZERR(b) do{if(b){fprintf(stderr,"%16s %4d %16s: ZMQ error: %s\n",__FILE__,__LINE__,__func__,zmq_strerror(zmq_errno()));abort();}}while(0)
+#define ZERR(b) do{if(b){fprintf(stderr,"%16s %4d %16s: ZMQ error(%d): %s\n",__FILE__,__LINE__,__func__,zmq_errno() ,zmq_strerror(zmq_errno()));abort();}}while(0)
 
 typedef enum {
   RAFT_MSG_REQUESTVOTE,
@@ -533,9 +533,9 @@ template <typename T>
   inline auto zmq_msgpk_pack_with_type(std::deque<msgpack::sbuffer*>& packs, T& data)
 {
   zmq_msgpk_pack(packs, T::MSG_TYPE);
-  #if TRACE
+#if TRACE
   print_send(data);
-  #endif
+#endif
   zmq_msgpk_pack(packs, data);
 }
 

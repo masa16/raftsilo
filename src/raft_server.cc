@@ -15,6 +15,7 @@ extern "C" {
   #include "raft_log.h"
   //#include "raft_private.h"
 }
+#include "../include/util.hh"
 #include "raft_msgpack.hh"
 #include "raft_server.hh"
 
@@ -169,7 +170,9 @@ static int router_handler(zloop_t *loop, zsock_t *socket, void *udata)
       ae.restore(mae);
       raft_appendentries_resp_t maer;
       raft_recv_appendentries(raft, raft_get_node(raft, id), &mae, &maer);
-      if (!maer.success) {
+      //if (maer.success) {
+      //  sv->ap_resp_vec_.emplace_back(id, maer);
+      //}
         int rc;
         rc = zmq_msg_send(&msg_id, socket, ZMQ_SNDMORE);
         ZERR(rc==-1);
@@ -177,11 +180,11 @@ static int router_handler(zloop_t *loop, zsock_t *socket, void *udata)
         ZERR(rc==-1);
         AppendEntriesResponse aer(raft, id, maer);
         zmq_msgpk_send_with_type(socket, aer);
-      } else {
-        sv->ap_resp_vec_.emplace_back(id, maer);
-        zmq_msg_close(&msg_id);
-        zmq_msg_close(&msg_null);
-      }
+      //} else {
+      //  sv->ap_resp_vec_.emplace_back(id, maer);
+      //  zmq_msg_close(&msg_id);
+      //  zmq_msg_close(&msg_null);
+      //}
       break;
     }
   case RAFT_MSG_CLIENTREQUEST:
@@ -230,11 +233,21 @@ static int __raft_appendentries(raft_server_t* raft, void* udata,
   raft_node_id_t id = raft_node_get_id(node);
   Server *sv = (Server*)udata;
   RequestHandler *rq = sv->get_request_handler(id);
+  //if (msg->n_entries > 0) return 0;
+  // if (msg->n_entries>10) printf("msg->n_entries=%d\n",msg->n_entries);
+#if 0
+  for (int i=0; i < msg->n_entries; ++i) {
+    if (msg->entries[i]->data_len > 4) msg->entries[i]->data_len = 4;
+  }
+#endif
   AppendEntries ae(raft, node, *msg);
+  //printf("__raft_appendentries\n");
+  //ae.print();
+  rq->send(ae);
+  //
   for (auto &ety : ae.entries_) {
     sv->id_map_.insert(std::make_pair(ae.msg_id_, ety.id_));
   }
-  rq->send(ae);
   return 0;
 }
 
@@ -250,16 +263,20 @@ static int __raft_persist_vote(raft_server_t* raft, void *udata, int vote)
 
 void Server::applylog(raft_entry_t *entry, raft_index_t idx)
 {
-  Entry ety(ety);
+  //return;
+  Entry ety(entry);
   size_t ety_size = ety.data_.size();
+  //printf("applylog: id_=%d ety_size=%zu\n",id_,ety_size);
+  logfile_.write(ety.data_.data(), ety_size);
+
+#if 0
   if (buffer_tail_ + ety_size > max_buffer_size_) {
     // write log
     logfile_.write(buffer_data_, ety_size);
     buffer_tail_ = 0;
 
     // send AppendEntriesResponse
-    //for (auto itr = ap_resp_vec_.begin(); itr != ap_resp_vec_.end(); ++itr) {
-      for (auto [id,maer] : ap_resp_vec_) {
+    for (auto [id,maer] : ap_resp_vec_) {
       //int id = a.first;
       //raft_appendentries_resp_t &maer = a.second;
         //int id = itr->first;
@@ -291,11 +308,13 @@ void Server::applylog(raft_entry_t *entry, raft_index_t idx)
   // append log to buffer
   memcpy(buffer_data_ + buffer_tail_, ety.data_.data(), ety_size);
   buffer_tail_ += ety_size;
+#endif
 }
 
 static int __raft_applylog(raft_server_t* raft, void *udata, raft_entry_t *entry, raft_index_t idx)
 {
   Server *sv = (Server*)udata;
+  //printf("RAFT_LOGTYPE_NORMAL=%d,entry->type=%d\n",RAFT_LOGTYPE_NORMAL,entry->type);
   switch (entry->type) {
   case RAFT_LOGTYPE_NORMAL:
     sv->applylog(entry, idx);
@@ -309,7 +328,7 @@ static int __raft_applylog(raft_server_t* raft, void *udata, raft_entry_t *entry
   return 0;
 }
 
-#define PERIOD_MSEC 50
+#define PERIOD_MSEC 10
 
 static int timer_count=0;
 static raft_entry_id_t entry_id=0;
@@ -319,6 +338,13 @@ static int s_timer_event(zloop_t *loop, int timer_id, void *udata)
   Server *sv = (Server*)udata;
   raft_server_t *raft = sv->raft_;
   raft_periodic(raft, PERIOD_MSEC);
+  return 0;
+  if (raft_get_nodeid(raft)==raft_get_leader_id(raft)) {
+    ++timer_count;
+    if (timer_count % (500/PERIOD_MSEC) == 0) {
+      printf("timer_count=%d\n",timer_count);
+    }
+  }
   return 0;
   // leader down test
   if (raft_get_nodeid(raft)==raft_get_leader_id(raft)) {
@@ -372,7 +398,7 @@ void Server::setup(std::vector<HostData> &hosts) {
   // new zloop
   loop_ = zloop_new();
   assert (loop_);
-  //zloop_set_verbose(loop, true);
+  //zloop_set_verbose(loop_, true);
 
   int rc;
   for (auto h : hosts) {
@@ -383,8 +409,8 @@ void Server::setup(std::vector<HostData> &hosts) {
       bind_socket_ = (zsock_t*)zmq_socket(context_, ZMQ_ROUTER);
       assert(bind_socket_);
       int mandatory=1;
-      rc = zmq_setsockopt(bind_socket_, ZMQ_ROUTER_MANDATORY, &mandatory, sizeof(int));
-      ZERR(rc!=0);
+      //rc = zmq_setsockopt(bind_socket_, ZMQ_ROUTER_MANDATORY, &mandatory, sizeof(int));
+      //ZERR(rc!=0);
       std::string url = h.bind_url();
       for (int i=0; i<5; ++i) {
         rc = zmq_bind(bind_socket_, url.c_str());
@@ -431,6 +457,17 @@ void Server::setup(std::vector<HostData> &hosts) {
   buffer_data_ = (std::byte*)::malloc(max_buffer_size_);
   buffer_tail_ = 0;
 
+  for (size_t i=0; i<thread_num_; ++i) {
+    zsock_t *sender = zsock_new(ZMQ_PAIR);
+    assert(sender);
+    zsock_bind(sender, "inproc://raft%d-w%zu", id_, i);
+    senders_.emplace_back(sender);
+    zsock_t *receiver = zsock_new(ZMQ_PAIR);
+    assert(receiver);
+    zsock_connect (receiver, "inproc://raft%d-w%zu", id_, i);
+    receivers_.emplace_back(receiver);
+  }
+
   /* candidate to leader */
   //if (a->id_==0) {
   //  raft_set_state(raft_, RAFT_STATE_CANDIDATE);
@@ -457,22 +494,33 @@ static int pipe_handler(zloop_t *loop, zsock_t *pipe, void *udata)
   size_t log_size;
   Server *sv = (Server*)udata;
 
-  int rc = zsock_recv(pipe, "i88b", &client_id, &sequence_num, &tid,
+  int rc;
+  rc = zsock_recv(pipe, "i88b", &client_id, &sequence_num, &tid,
     //&nid, sizeof(NotificationId),
     &log_set, &log_size);
+  assert(rc==0);
+  rc = zsock_send(pipe, "i", 0);
+  assert(rc==0);
+  //printf("zsock_recv: client_id=%d, sequence_num=%zu, tid=%zu\n",client_id,sequence_num,tid);
 
   int status = OK;
   if (status == OK) {
     Entry ety(raft_get_current_term(sv->raft_), ety_id, ety_type, log_set, log_size);
+    //ety.print(sequence_num);
     free(log_set);
     raft_entry_t *mety = ety.restore();
     raft_entry_resp_t metyr;
-    int rc;
+    sv->entry_count_ ++;
+    //return 0;
+
+    std::uint64_t t1 = rdtscp();
     rc = raft_recv_entry(sv->raft_, mety, &metyr);
+    std::uint64_t t2 = rdtscp();
+    sv->entry_latency_ += t2-t1;
     raft_entry_release(mety);
     if (rc!=0)
       status = rc;
-    sv->waiting_response_[ety_id] = new ClientRequestResponse(sv->id_, client_id, status);
+    //sv->waiting_response_[ety_id] = new ClientRequestResponse(sv->id_, client_id, status);
     ++ety_id;
   }
   if (status != OK) {
@@ -483,14 +531,48 @@ static int pipe_handler(zloop_t *loop, zsock_t *pipe, void *udata)
   return 0;
 }
 
+void Server::receive_entry(char *log_set, size_t log_size)
+{
+  static raft_entry_id_t ety_id = 0;
+  static short ety_type = RAFT_LOGTYPE_NORMAL;
+
+  Entry ety(raft_get_current_term(raft_), ety_id, ety_type, log_set, log_size);
+  raft_entry_t *mety = ety.restore();
+  raft_entry_resp_t metyr;
+  int rc;
+  rc = raft_recv_entry(raft_, mety, &metyr);
+  raft_entry_release(mety);
+}
+
+
+static int s_exit_event(zloop_t *loop, zsock_t *pipe, void *called)
+{
+  // end the reactor
+  return -1;
+}
+
+
 void Server::start(zsock_t *pipe) {
-  zloop_reader(loop_, pipe, pipe_handler, this);
-  //  Create a timer that for raft_periodic
+  for (auto r : receivers_)
+    zloop_reader(loop_, r, pipe_handler, this);
+  // Create a timer that for raft_periodic
   timer_id_ = zloop_timer(loop_, PERIOD_MSEC, 0, s_timer_event, this);
+  // exit_event
+  bool called = false;
+  zloop_reader(loop_, pipe, s_exit_event, &called);
   zloop_start(loop_);
 }
 
+
+
 void Server::stop() {
+  //puts("--- stop ---");
+  for (auto s : senders_) {
+    zsock_destroy(&s);
+  }
+  for (auto r : receivers_) {
+    zsock_destroy(&r);
+  }
   if (timer_id_) {
     zloop_timer_end(loop_, timer_id_);
     timer_id_ = 0;
@@ -504,5 +586,14 @@ void Server::stop() {
     auto rq = a.second;
     zloop_reader_end(loop_, rq->socket_);
     delete rq;
+  }
+}
+
+
+void Server::display(size_t clocks_per_us) {
+  if (entry_count_>0) {
+    cout << "raft_entry_count:\t" << entry_count_ << endl;
+    double t = (double)entry_latency_ / clocks_per_us / entry_count_;
+    cout << std::fixed << std::setprecision(4) << "raft_entry_latency[ms]:\t" << t/1000 << endl;
   }
 }

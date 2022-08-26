@@ -12,6 +12,7 @@ extern "C" {
   #include "raft_log.h"
   //#include "raft_private.h"
 }
+#include "include/common.hh"
 #include "raft_msgpack.hh"
 #include "raft_server.hh"
 #include "raft_client.hh"
@@ -30,9 +31,10 @@ static void server_thread(zsock_t *pipe, void *udata)
   zsock_signal(pipe, 0);
   ServerData *a = (ServerData*)udata;
   //printf("a->id_=%d\n",a->id_);
-  Server sv(a->context_, a->id_, a->tx_queue_);
+  Server sv(a->context_, a->id_, a->tx_queue_, FLAGS_thread_num);
   sv.setup(a->hosts_);
   a->raft_ = sv.raft_;
+  a->server_ = &sv;
   // synchronize
   const char s[] = "READY";
   zsock_send(pipe, "s", s);
@@ -41,6 +43,7 @@ static void server_thread(zsock_t *pipe, void *udata)
   assert(strcmp(r,"GO")==0);
   free(r);
   sv.start(pipe);
+  sv.stop();
 }
 
 
@@ -89,41 +92,111 @@ int RaftCC::start()
     hosts_.emplace_back(i,"localhost",51110+i);
   }
   for (auto h : hosts_) {
-    ServerData *sv = new ServerData(h.id_, hosts_, context_, &tx_queue_);
-    servers_.emplace_back(sv);
+    ServerData *svd = new ServerData(h.id_, hosts_, context_, &tx_queue_);
+    serverdata_.emplace_back(svd);
   }
-  for (auto sv : servers_) {
-    sv->setup(server_thread);
-    actors_[sv->id_] = sv->actor_;
+  for (auto svd : serverdata_) {
+    svd->setup(server_thread);
+    actors_[svd->id_] = svd->actor_;
+    servers_[svd->id_] = svd->server_;
   }
-  for (auto sv : servers_) {
-    sv->start();
+  for (auto svd : serverdata_) {
+    svd->start();
   }
+  wait_leader_elected();
+  //printf("pass\n");
 
+#if HAS_CLIENT
   ClientData *cdata = new ClientData(context_, hosts_[0], 8);
   zactor_t *c = zactor_new(client_thread, cdata);
 
   zactor_destroy(&c);
-  for (auto sv : servers_) {
-    sv->destroy();
-    //delete sv;
-  }
   delete cdata;
-
-  rc = zmq_ctx_term(context_);
-  assert(rc==0);
+#endif
   return 0;
+}
+
+void RaftCC::end()
+{
+  if (send_log_count_>0) {
+    cout << "raft_send_log_count:\t" << send_log_count_ << endl;
+    double t = (double)send_log_latency_ / FLAGS_clocks_per_us / send_log_count_;
+    cout << std::fixed << std::setprecision(4) << "raft_send_log_latency[ms]:\t" << t/1000 << endl;
+  }
+
+  for (auto svd : serverdata_) {
+    svd->server_->display(FLAGS_clocks_per_us);
+  }
+
+  for (auto svd : serverdata_) {
+    svd->destroy();
+  }
+  // avoid freezing
+  //int rc = zmq_ctx_term(context_);
+  //assert(rc==0);
+}
+
+
+raft_node_id_t RaftCC::wait_leader_elected()
+{
+  raft_node_id_t leader_id;
+  while(true) {
+    leader_id = raft_get_leader_id(serverdata_[0]->raft_);
+    if (leader_id>=0) break;
+    printf("leader_id=%d\n",leader_id);
+    sleep(1);
+  }
+  assert(leader_id>=0);
+  return leader_id;
 }
 
 
 void RaftCC::send_log(int client_id, long sequence_num, std::uint64_t tid, //NotificationId &nid,
-  std::vector<LogRecord> &log_set)
+  std::vector<LogRecord> &log_set, size_t thid)
 {
-  raft_node_id_t leader_id = raft_get_leader_id(servers_[0]->raft_);
-  assert(leader_id>=0);
+  raft_node_id_t leader_id = wait_leader_elected();
   zactor_t *a = actors_[leader_id];
-  int rc = zsock_send(a, "i88b", client_id, (uint64_t)sequence_num, tid,
-    //&nid, sizeof(NotificationId),
-    &log_set[0], log_set.size()*sizeof(LogRecord));
+  Server *s = servers_[leader_id];
+  //return;
+  int rc;
+  {
+    //std::lock_guard<std::mutex> lock(mutex_);
+    uint64_t t = rdtscp();
+    rc = zsock_send(s->senders_[thid], "i88b", client_id, (uint64_t)sequence_num, tid,
+      &log_set[0], log_set.size()*sizeof(LogRecord));
+    //s->receive_entry((char*)&log_set[0], log_set.size()*sizeof(LogRecord));
+    send_log_latency_ += rdtscp() - t;
+    send_log_count_ ++;
+  }
   assert(rc>0);
+}
+
+
+void RaftCC::send_log(void *log_set, size_t log_size, size_t thid)
+{
+  static int client_id = 0;
+  static uint64_t sequence_num = 0;
+  static uint64_t tid = 0;
+  raft_node_id_t leader_id = wait_leader_elected();
+  Server *s = servers_[leader_id];
+  //return;
+  int rc;
+  send_time_ = rdtscp();
+  rc = zsock_send(s->senders_[thid], "i88b", client_id, (uint64_t)sequence_num, tid,
+    log_set, log_size);
+  assert(rc>0);
+}
+
+
+void RaftCC::recv_rep(size_t thid)
+{
+  raft_node_id_t leader_id = wait_leader_elected();
+  Server *s = servers_[leader_id];
+  //return;
+  int rc;
+  int r;
+  rc = zsock_recv(s->senders_[thid], "i", &r);
+  assert(r==0);
+  send_log_latency_ += rdtscp() - send_time_;
+  send_log_count_ ++;
 }

@@ -44,6 +44,7 @@
 #include "raft_cc.hh"
 #include "raft_txn.hh"
 
+
 #if DURABLE_EPOCH
 void worker(size_t thid, char &ready, const bool &start, const bool &quit, std::atomic<Logger*> *logp, RaftCC *raft_cc)
 {
@@ -87,17 +88,25 @@ void worker(size_t thid, char &ready, const bool &start, const bool &quit, RaftC
 
   storeRelease(ready, 1);
   while (!loadAcquire(start)) _mm_pause();
+  //printf("worker#%lu start\n",thid);
   if (thid == 0) epoch_timer_start = rdtscp();
   while (!loadAcquire(quit)) {
-
+#if HAS_CLIENT
     ClientRequest tx = std::move(raft_cc->tx_queue_.pop());
     std::vector<ProcedureX> pro_set = tx.command_;
+#else
+    std::vector<Procedure> pro_set;
+    makeProcedure(pro_set, rnd, zipf, FLAGS_tuple_num, FLAGS_max_ope,
+      FLAGS_thread_num, FLAGS_rratio, FLAGS_rmw, FLAGS_ycsb, false,
+      thid, myres);
+#endif
 
 #if PROCEDURE_SORT
     sort(pro_set.begin(), pro_set.end());
 #endif
 
 RETRY:
+    //usleep(100000);
     if (thid == 0) {
       leaderWork(epoch_timer_start, epoch_timer_stop);
 #if BACK_OFF
@@ -112,7 +121,11 @@ RETRY:
 
     if (loadAcquire(quit)) break;
 
+#if HAS_CLIENT
     trans.begin(tx.source_node_, tx.sequence_num_);
+#else
+    trans.begin(thid, 0);
+#endif
     for (auto itr = pro_set.begin(); itr != pro_set.end();
          ++itr) {
       if ((*itr).ope_ == Ope::READ) {
@@ -156,7 +169,7 @@ RETRY:
     std::cout << "Logger #" << thid << ": on CPU " << sched_getcpu() << "\n";
   }
 #endif
-  alignas(CACHE_LINE_SIZE) Logger logger(thid, notifier);
+  alignas(CACHE_LINE_SIZE) Logger logger(thid, notifier, raft_cc);
   notifier.add_logger(&logger);
   logp->store(&logger);
   logger.worker();
@@ -232,17 +245,22 @@ int main(int argc, char *argv[]) try {
 #endif
   //raft_test_start(&tx_queue);
   //std::thread rth(raft_thread, &raft_cc);
+  raft_cc.start();
   waitForReady(readys);
   storeRelease(start, true);
-  raft_cc.start();
   for (size_t i = 0; i < FLAGS_extime; ++i) {
     sleepMs(1000);
   }
+  //printf("FLAGS_extime %zu\n",FLAGS_extime);
   storeRelease(quit, true);
 #if DURABLE_EPOCH
   for (auto &th : lthv) th.join();
 #endif
   for (auto &th : thv) th.join();
+
+  //puts("passx");
+  raft_cc.end();
+  //puts("passss");
 
   for (unsigned int i = 0; i < FLAGS_thread_num; ++i) {
     SiloResult[0].addLocalAllResult(SiloResult[i]);

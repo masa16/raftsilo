@@ -19,6 +19,6 @@ $ ./bootstrap.sh
 ```
 $ mkdir build
 $ cd build
-$ cmake -DCMAKE_BUILD_TYPE=Release -DWAL=1 ..
+$ cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DWAL=1 ../src
 $ make
 ```
