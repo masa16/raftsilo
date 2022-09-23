@@ -89,7 +89,7 @@ int RaftCC::start()
   assert(context_);
 
   for (int i=1; i<=NSERVERS; i++) {
-    hosts_.emplace_back(i,"localhost",51110+i);
+    hosts_.emplace_back(i,"localhost");
   }
   for (auto h : hosts_) {
     ServerData *svd = new ServerData(h.id_, hosts_, context_, &tx_queue_);

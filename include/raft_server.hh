@@ -65,6 +65,8 @@ public:
   void *context_;
   raft_server_t *raft_ = NULL;
   zsock_t *bind_socket_ = NULL;
+  zsock_t *publisher_socket_ = NULL;
+  std::map<raft_node_id_t,zsock_t*> subscriber_sockets_;
   zloop_t *loop_ = NULL;
   int timer_id_ = 0;
   std::map<raft_node_id_t,HostData> host_map_;
