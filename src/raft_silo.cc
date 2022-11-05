@@ -21,6 +21,7 @@
 #include "include/common_lg.hh"
 #include "include/util_lg.hh"
 #include "include/result_lg.hh"
+DEFINE_int32(raft_id, -1, "Raft server ID");
 #include "include/silo_result.hh"
 #include "include/transaction_lg.hh"
 #include "include/logger.hh"
@@ -52,10 +53,6 @@ void worker(size_t thid, char &ready, const bool &start, const bool &quit, std::
   Result &myres = std::ref(myres_lg.result_);
   RaftTxnExecutor trans(thid, (ResultLg *) &myres_lg, raft_cc);
 #else
-void worker(size_t thid, char &ready, const bool &start, const bool &quit, RaftCC *raft_cc)
-{
-  Result &myres = std::ref(SiloResult[thid]);
-  RaftTxnExecutor trans(thid, (Result *) &myres, raft_cc);
 #endif
   Xoroshiro128Plus rnd;
   rnd.init();
@@ -90,7 +87,14 @@ void worker(size_t thid, char &ready, const bool &start, const bool &quit, RaftC
   while (!loadAcquire(start)) _mm_pause();
   //printf("worker#%lu start\n",thid);
   if (thid == 0) epoch_timer_start = rdtscp();
+
   while (!loadAcquire(quit)) {
+    raft_node_id_t leader_id = raft_cc->wait_leader_elected();
+    if (FLAGS_raft_id >= 0 && leader_id != FLAGS_raft_id) {
+      sleep(1);
+      continue;
+    }
+
 #if HAS_CLIENT
     ClientRequest tx = std::move(raft_cc->tx_queue_.pop());
     std::vector<ProcedureX> pro_set = tx.command_;
@@ -163,7 +167,7 @@ RETRY:
 }
 
 #if DURABLE_EPOCH
- void logger_th(int thid, Notifier &notifier, std::atomic<Logger*> *logp, RaftCC *raft_cc){
+void logger_th(int thid, Notifier &notifier, std::atomic<Logger*> *logp, RaftCC *raft_cc){
 #if 0
   if (!FLAGS_affinity.empty()) {
     std::cout << "Logger #" << thid << ": on CPU " << sched_getcpu() << "\n";
@@ -186,9 +190,12 @@ void set_cpu(std::thread &th, int cpu) {
 }
 #endif
 
+#if 0
 void raft_thread(RaftCC *raft_cc) {
   raft_cc->start();
 }
+#endif
+
 
 int main(int argc, char *argv[]) try {
   gflags::SetUsageMessage("Silo benchmark.");
@@ -222,6 +229,7 @@ int main(int argc, char *argv[]) try {
   std::atomic<Logger *> logs[FLAGS_logger_num];
   Notifier notifier;
   std::vector<std::thread> lthv;
+  raft_cc.read_server_data("hosts.dat");
 
   int i=0, j=0;
   for (auto itr = affin.nodes_.begin(); itr != affin.nodes_.end(); ++itr,++j) {
@@ -245,14 +253,17 @@ int main(int argc, char *argv[]) try {
 #endif
   //raft_test_start(&tx_queue);
   //std::thread rth(raft_thread, &raft_cc);
-  raft_cc.start();
+  raft_cc.start(FLAGS_raft_id);
   waitForReady(readys);
+  int result;
+  result = ::system("./bench_start.sh");
   storeRelease(start, true);
   for (size_t i = 0; i < FLAGS_extime; ++i) {
     sleepMs(1000);
   }
   //printf("FLAGS_extime %zu\n",FLAGS_extime);
   storeRelease(quit, true);
+  result = ::system("./bench_end.sh");
 #if DURABLE_EPOCH
   for (auto &th : lthv) th.join();
 #endif
@@ -262,15 +273,19 @@ int main(int argc, char *argv[]) try {
   raft_cc.end();
   //puts("passss");
 
-  for (unsigned int i = 0; i < FLAGS_thread_num; ++i) {
-    SiloResult[0].addLocalAllResult(SiloResult[i]);
-  }
-  ShowOptParameters();
+  raft_node_id_t leader_id = raft_cc.wait_leader_elected();
+  printf("leader_id=%d\n", leader_id);
+  if (FLAGS_raft_id < 0 || leader_id == FLAGS_raft_id) {
+    for (unsigned int i = 0; i < FLAGS_thread_num; ++i) {
+      SiloResult[0].addLocalAllResult(SiloResult[i]);
+    }
+    ShowOptParameters();
 #if DURABLE_EPOCH
-  notifier.display();
+    notifier.display();
 #endif
-  SiloResult[0].displayAllResult(FLAGS_clocks_per_us, FLAGS_extime,
-                                 FLAGS_thread_num);
+    SiloResult[0].displayAllResult(FLAGS_clocks_per_us, FLAGS_extime,
+      FLAGS_thread_num);
+  }
 
   return 0;
 } catch (bad_alloc) {

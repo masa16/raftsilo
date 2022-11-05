@@ -68,7 +68,8 @@ public:
   uint64_t send_log_latency_ = 0;
 
   raft_node_id_t wait_leader_elected();
-  int start();
+  void read_server_data(std::string filename);
+  int start(int id);
   void end();
   void send_log(int client_id, long sequence_num, std::uint64_t tid, //NotificationId &nid,
     std::vector<LogRecord> &log_set, size_t thid);

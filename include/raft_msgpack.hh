@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <algorithm>
 #include <msgpack.hpp>
 extern "C" {
   #include "raft.h"
@@ -181,11 +182,20 @@ public:
   std::string hostname_;
   std::uint32_t req_port_ = 0;
   std::uint32_t pub_port_ = 0;
+  bool is_leader_ = false;
   MSGPACK_DEFINE(id_, hostname_, req_port_, pub_port_);
 
   HostData() {};
-  //HostData(raft_node_id_t id, std::string hostname, std::uint32_t port) :
-  //  id_(id), hostname_(hostname), port_(port) {}
+  HostData(raft_node_id_t id, std::string hostname,
+    std::uint32_t req_port, std::uint32_t pub_port) :
+    id_(id), hostname_(hostname), req_port_(req_port), pub_port_(pub_port) {}
+  HostData(raft_node_id_t id, std::string hostname,
+    std::uint32_t req_port, std::uint32_t pub_port, std::string state) :
+    id_(id), hostname_(hostname), req_port_(req_port), pub_port_(pub_port) {
+    std::string s;
+    std::transform(state.cbegin(), state.cend(), s.begin(), [](unsigned char c){ return std::toupper(c); });
+    is_leader_ = (s=="L" || s=="LEADER");
+  }
   HostData(raft_node_id_t id, std::string hostname) :
     id_(id), hostname_(hostname) {
     req_port_ = 51110 + id_*2;
@@ -206,14 +216,22 @@ public:
   }
 
   std::string subscriber_url() {
+    #ifdef PGM
+    std::string url = "pgm://ibp23s0;239.192.1.1:";
+    #else
     std::string url = "tcp://";
     url.append(hostname_);
     url.append(":");
+    #endif
     url.append(std::to_string(pub_port_));
     return url;
   }
   std::string publisher_url() {
+    #ifdef PGM
+    std::string url = "pgm://ibp23s0;239.192.1.1:";
+    #else
     std::string url = "tcp://*:";
+    #endif
     url.append(std::to_string(pub_port_));
     return url;
   }

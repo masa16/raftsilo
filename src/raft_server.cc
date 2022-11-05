@@ -283,7 +283,8 @@ void Server::applylog(raft_entry_t *entry, raft_index_t idx)
   //printf("id=%d leader_id=%d log_size=%zu msg_size=%zu, sock=%p\n",id,leader_id,log_size,len,socket);
   //return;
 
-  if (id != leader_id) {
+  //if (id != leader_id) {
+  {
     zmq_msg_t msg;
     int rc;
     rc = zmq_msg_init(&msg);
@@ -295,7 +296,8 @@ void Server::applylog(raft_entry_t *entry, raft_index_t idx)
     //fprintf(stderr,"recv(%zd):",len); for(size_t i=0; i<len; i++) fprintf(stderr," %02x",(unsigned int)buffer[i]); fprintf(stderr,"\n"); fflush(stderr);
     //printf("id=%d leader_id=%d log_size=%zu msg_size=%zu\n",id,leader_id,log_size,len);
     assert(len>0);
-    if(len>0 && len!=log_size) abort();
+    if(len > 0 && len != log_size) abort();
+    // write logs to storage
     //logfile_.write(static_cast<char*>(zmq_msg_data(&msg)), len);
     rc = zmq_msg_close(&msg);
   }
@@ -503,8 +505,8 @@ void Server::setup(std::vector<HostData> &hosts) {
       ZERR(rc!=0);
       std::string url = h.subscriber_url();
       rc = zmq_connect(sock, url.c_str());
-      ZERR(rc!=0);
       printf("%d:connect to publsr %d: %s, %p\n", id_, id, url.c_str(), subscriber_sockets_[id]);
+      ZERR(rc!=0);
       //add_socket(id, sock);
       //zloop_reader(loop_, sock, subscriber_handler, new_subscriber_handler(id,sock));
     }
@@ -553,6 +555,14 @@ void Server::setup(std::vector<HostData> &hosts) {
   //raft_set_commit_idx(raft_, 0);
   /* the last applied idx will became 1, and then 2 */
   //raft_set_last_applied_idx(raft_, 0);
+  for (auto h : hosts) {
+    raft_node_id_t id = h.id_;
+    if (id_ == id) {
+      if (h.is_leader_) {
+        raft_set_state(raft_, RAFT_STATE_LEADER);
+      }
+    }
+  }
 }
 
 #define OK 0

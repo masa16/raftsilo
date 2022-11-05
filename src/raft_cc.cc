@@ -1,3 +1,7 @@
+#include <iostream>
+#include <string>
+#include <fstream> //for ifstream
+#include <sstream> //for istringstream
 extern "C" {
   #include <stdbool.h>
   #include <assert.h>
@@ -80,8 +84,49 @@ static void client_thread(zsock_t *pipe, void *udata)
 }
 
 
+void RaftCC::read_server_data(std::string filename) {
+  std::ifstream ifs(filename);
+  std::string str, hostname, state;
+  int id, req_port, pub_port;
+
+  while(std::getline(ifs, str)) {
+    std::istringstream iss(str);
+    iss >> id >> hostname >> req_port >> pub_port >> state;
+    hosts_.emplace_back(id, hostname, req_port, pub_port, state);
+    //std::cout << "id=" << id << ", hostname=" << hostname << ", req_port=" << req_port << ", pub_port=" << pub_port << std::endl;
+  }
+}
+
+
+int RaftCC::start(int id)
+{
+  int rc;
+  context_ = zmq_ctx_new();
+  assert(context_);
+
+  for (auto h : hosts_) {
+    if (id < 0 || h.id_ == id) {
+      ServerData *svd = new ServerData(h.id_, hosts_, context_, &tx_queue_);
+      serverdata_.emplace_back(svd);
+    }
+  }
+  for (auto svd : serverdata_) {
+    svd->setup(server_thread);
+    actors_[svd->id_] = svd->actor_;
+    servers_[svd->id_] = svd->server_;
+  }
+  for (auto svd : serverdata_) {
+    svd->start();
+  }
+  wait_leader_elected();
+
+  return 0;
+}
+
+
 #define NSERVERS 5
 
+#if 0
 int RaftCC::start()
 {
   int rc;
@@ -115,6 +160,7 @@ int RaftCC::start()
 #endif
   return 0;
 }
+#endif
 
 void RaftCC::end()
 {
@@ -139,13 +185,17 @@ void RaftCC::end()
 
 raft_node_id_t RaftCC::wait_leader_elected()
 {
+  int n_nodes;
   raft_node_id_t leader_id;
+
   while(true) {
     leader_id = raft_get_leader_id(serverdata_[0]->raft_);
+    n_nodes = raft_get_num_nodes(serverdata_[0]->raft_);
     if (leader_id>=0) break;
-    printf("leader_id=%d\n",leader_id);
+    printf("leader_id=%d n_nodes=%d\n",leader_id,n_nodes);
     sleep(1);
   }
+  assert(n_nodes==hosts_.size);
   assert(leader_id>=0);
   return leader_id;
 }
