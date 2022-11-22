@@ -99,7 +99,7 @@ public:
   void setup(std::vector<HostData> &hosts);
   void start(zsock_t *pipe);
   void stop();
-  void send_response_to_clinet(raft_msg_id_t msg_id);
+  void send_response_to_client(raft_msg_id_t msg_id);
   void applylog(raft_entry_t *entry, raft_index_t idx);
 
   void receive_entry(char *log_set, size_t log_size);

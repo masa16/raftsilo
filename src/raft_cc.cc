@@ -11,6 +11,7 @@ extern "C" {
   #include <stdint.h>
   #include <zmq.h>
   #include <czmq.h>
+  #include <sched.h>
 
   #include "raft.h"
   #include "raft_log.h"
@@ -39,6 +40,9 @@ static void server_thread(zsock_t *pipe, void *udata)
   sv.setup(a->hosts_);
   a->raft_ = sv.raft_;
   a->server_ = &sv;
+
+  std::cout << "RaftServer #" << a->id_ << ": on CPU " << sched_getcpu() << "\n";
+
   // synchronize
   const char s[] = "READY";
   zsock_send(pipe, "s", s);
@@ -232,7 +236,7 @@ void RaftCC::send_log(void *log_set, size_t log_size, size_t thid)
   //return;
   int rc;
   send_time_ = rdtscp();
-  rc = zsock_send(s->senders_[thid], "i88b", client_id, (uint64_t)sequence_num, tid,
+  rc = zsock_send(s->senders_[thid], "i88p8", client_id, (uint64_t)sequence_num, tid,
     log_set, log_size);
   assert(rc>0);
 }

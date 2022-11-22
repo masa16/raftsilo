@@ -83,6 +83,7 @@ void worker(size_t thid, char &ready, const bool &start, const bool &quit, std::
   logger->add_txn_executor(trans);
 #endif
 
+  //std::cout << "Worker #" << thid << ": on CPU " << sched_getcpu() << "\n";
   storeRelease(ready, 1);
   while (!loadAcquire(start)) _mm_pause();
   //printf("worker#%lu start\n",thid);
@@ -176,6 +177,7 @@ void logger_th(int thid, Notifier &notifier, std::atomic<Logger*> *logp, RaftCC 
   alignas(CACHE_LINE_SIZE) Logger logger(thid, notifier, raft_cc);
   notifier.add_logger(&logger);
   logp->store(&logger);
+  //std::cout << "Logger #" << thid << ": on CPU " << sched_getcpu() << "\n";
   logger.worker();
 }
 
