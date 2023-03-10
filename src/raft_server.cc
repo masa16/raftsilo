@@ -559,11 +559,19 @@ void Server::setup(std::vector<HostData> &hosts) {
   //raft_set_commit_idx(raft_, 0);
   /* the last applied idx will became 1, and then 2 */
   //raft_set_last_applied_idx(raft_, 0);
+  // set leader
+  bool has_leader = false;
   for (auto h : hosts) {
     raft_node_id_t id = h.id_;
     if (id_ == id) {
+      fprintf(stderr,"id_=%d h.id_=%d\n", id_, id);
       if (h.is_leader_) {
-        raft_set_state(raft_, RAFT_STATE_LEADER);
+        if (has_leader) {
+          fprintf(stderr,"multiple leader\n");
+          abort();
+        }
+        raft_timeout_now(raft_);
+        fprintf(stderr,"timeout now, id=%d\n", id);
       }
     }
   }
@@ -702,7 +710,7 @@ void Server::stop() {
   }
   if (publisher_socket_) {
     zmq_close(publisher_socket_);
-    bind_socket_ = NULL;
+    publisher_socket_ = NULL;
   }
   for (auto a : subscriber_sockets_) {
     auto sock = a.second;

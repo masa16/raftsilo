@@ -192,9 +192,10 @@ public:
   HostData(raft_node_id_t id, std::string hostname,
     std::uint32_t req_port, std::uint32_t pub_port, std::string state) :
     id_(id), hostname_(hostname), req_port_(req_port), pub_port_(pub_port) {
-    std::string s;
+    std::string s("      ");
     std::transform(state.cbegin(), state.cend(), s.begin(), [](unsigned char c){ return std::toupper(c); });
-    is_leader_ = (s=="L" || s=="LEADER");
+    std::cout << "state=" << state << ",s=" << s << "," << std::endl;
+    is_leader_ = (s=="L     " || s=="LEADER");
   }
   HostData(raft_node_id_t id, std::string hostname) :
     id_(id), hostname_(hostname) {
