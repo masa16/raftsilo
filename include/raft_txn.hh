@@ -3,7 +3,7 @@
 extern "C" {
   #include "raft.h"
 }
-#include "raft_msgpack.hh"
+//#include "raft_msgpack.hh"
 #include "raft_cc.hh"
 #if DURABLE_EPOCH
 #include "include/transaction_lg.hh"

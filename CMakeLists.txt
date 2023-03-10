@@ -63,9 +63,13 @@ else ()
     set(DURABLE_EPOCH 1)
 endif ()
 
+file(GLOB FOLLOWER_SOURCES
+  src/raft_follower.cc
+  )
+
 if (${DURABLE_EPOCH} EQUAL 0)
   file(GLOB SILO_SOURCES
-    src/raft_server.cc
+    #src/raft_server.cc
     src/raft_cc.cc
     src/raft_txn.cc
     src/raft_silo.cc
@@ -77,7 +81,7 @@ if (${DURABLE_EPOCH} EQUAL 0)
     )
 else ()
   file(GLOB SILO_SOURCES
-    src/raft_server.cc
+    #src/raft_server.cc
     src/raft_cc.cc
     src/raft_txn.cc
     src/raft_silo.cc
@@ -96,6 +100,7 @@ else ()
 endif ()
 
 add_executable(raft_silo ${SILO_SOURCES})
+add_executable(raft_follower ${FOLLOWER_SOURCES})
 
 target_include_directories(raft_silo
   PUBLIC include
@@ -105,6 +110,11 @@ target_include_directories(raft_silo
   #PUBLIC third_party/ccbench/include
   PUBLIC ${ZeroMQ_INCLUDE_DIR}
   PUBLIC ${CZeroMQ_INCLUDE_DIR}
+  )
+
+target_include_directories(raft_follower
+  PUBLIC include
+  PUBLIC ${ZeroMQ_INCLUDE_DIR}
   )
 
 target_link_libraries(raft_silo
@@ -119,6 +129,10 @@ target_link_libraries(raft_silo
   PUBLIC ${CZeroMQ_LIBRARY}
   PUBLIC numa
   #PUBLIC pmem
+  )
+
+target_link_libraries(raft_follower
+  PUBLIC ${ZeroMQ_LIBRARY}
   )
 
 if (DEFINED ADD_ANALYSIS)
@@ -191,4 +205,16 @@ if (DEFINED LOG_WRITER)
     add_definitions(-DLOG_WRITER=${LOG_WRITER})
 else ()
     add_definitions(-DLOG_WRITER=0)
+endif ()
+
+if (DEFINED RAFTCC)
+  add_definitions(-DRAFTCC=${RAFTCC})
+else ()
+  add_definitions(-DRAFTCC=1)
+endif ()
+
+if (DEFINED ZMQ_PUBSUB)
+  add_definitions(-DZMQ_PUBSUB=${ZMQ_PUBSUB})
+else ()
+  add_definitions(-DZMQ_PUBSUB=0)
 endif ()

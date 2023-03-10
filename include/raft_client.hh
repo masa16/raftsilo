@@ -1,5 +1,6 @@
 #pragma once
 #include <cassert>
+#include <chrono>
 extern "C" {
   #include <stdbool.h>
   #include <stdlib.h>
@@ -34,6 +35,7 @@ public:
   Result result_;
   Xoroshiro128Plus rnd_;
   FastZipf *zipf_;
+  std::chrono::system_clock::time_point start_time_;
 
   Client(raft_node_id_t id, zloop_t *loop, HostData &server, void *context) :
     id_(id), loop_(loop), server_(server), context_(context) {
@@ -130,6 +132,10 @@ static int client_handler(zloop_t *loop, zsock_t *socket, void *udata)
   Client *c = (Client*)udata;
   assert(c->socket_==socket);
 
+  //if (c->sequence_num_==0) {
+  static auto start_time_ = std::chrono::system_clock::now();
+  //}
+
   // receive empty delimiter frame
   int rc, more;
   size_t len;
@@ -174,7 +180,8 @@ static int client_handler(zloop_t *loop, zsock_t *socket, void *udata)
     {
       ClientRequestResponse ccr;
       zmq_msgpk_recv(socket, ccr);
-      usleep(100000);
+      //usleep(100000);
+      usleep(100);
       break;
     }
   default:
@@ -189,8 +196,15 @@ static int client_handler(zloop_t *loop, zsock_t *socket, void *udata)
 
   // send next data
   c->send(c->pro_set_);
-  if (c->sequence_num_%100==0) {printf("client id=%d seq_num=%ld\n", c->id_, c->sequence_num_);}
-  return (c->sequence_num_==200) ? -1 : 0;
+  if (c->sequence_num_%100==0) {
+    auto t = std::chrono::system_clock::now();
+    auto dur = t - start_time_;
+    auto usec = std::chrono::duration_cast<std::chrono::microseconds>(dur).count();
+    printf("client id=%d seq_num=%ld t=%ld\n", c->id_, c->sequence_num_, usec/c->sequence_num_);
+  }
+  return 0;
+  //if (c->sequence_num_==300) abort();
+  //return (c->sequence_num_==300) ? -1 : 0;
 }
 
 void Client::connect()

@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <algorithm>
 #include <msgpack.hpp>
 extern "C" {
   #include "raft.h"
@@ -10,7 +11,7 @@ extern "C" {
 }
 #include "procedurex.hh"
 
-#define TRACE 1
+#define TRACE 0
 
 #if 0
 typedef int                raft_entry_id_t;
@@ -21,7 +22,7 @@ typedef int                raft_node_id_t;
 typedef unsigned long      raft_msg_id_t;
 #endif
 
-#define ZERR(b) do{if(b){fprintf(stderr,"%16s %4d %16s: ZMQ error: %s\n",__FILE__,__LINE__,__func__,zmq_strerror(zmq_errno()));abort();}}while(0)
+#define ZERR(b) do{if(b){fprintf(stderr,"%16s %4d %16s: ZMQ error(%d): %s\n",__FILE__,__LINE__,__func__,zmq_errno() ,zmq_strerror(zmq_errno()));abort();}}while(0)
 
 typedef enum {
   RAFT_MSG_REQUESTVOTE,
@@ -179,29 +180,66 @@ public:
   static const int MSG_TYPE = RAFT_MSG_LEADER_HINT;
   raft_node_id_t id_ = -1;
   std::string hostname_;
-  std::uint32_t port_ = 0;
-  MSGPACK_DEFINE(id_, hostname_, port_);
+  std::uint32_t req_port_ = 0;
+  std::uint32_t pub_port_ = 0;
+  bool is_leader_ = false;
+  MSGPACK_DEFINE(id_, hostname_, req_port_, pub_port_);
 
   HostData() {};
-  HostData(raft_node_id_t id, std::string hostname, std::uint32_t port) :
-    id_(id), hostname_(hostname), port_(port) {}
+  HostData(raft_node_id_t id, std::string hostname,
+    std::uint32_t req_port, std::uint32_t pub_port) :
+    id_(id), hostname_(hostname), req_port_(req_port), pub_port_(pub_port) {}
+  HostData(raft_node_id_t id, std::string hostname,
+    std::uint32_t req_port, std::uint32_t pub_port, std::string state) :
+    id_(id), hostname_(hostname), req_port_(req_port), pub_port_(pub_port) {
+    std::string s("      ");
+    std::transform(state.cbegin(), state.cend(), s.begin(), [](unsigned char c){ return std::toupper(c); });
+    std::cout << "state=" << state << ",s=" << s << "," << std::endl;
+    is_leader_ = (s=="L     " || s=="LEADER");
+  }
+  HostData(raft_node_id_t id, std::string hostname) :
+    id_(id), hostname_(hostname) {
+    req_port_ = 51110 + id_*2;
+    pub_port_ = 51111 + id_*2;
+  }
 
   std::string connect_url() {
     std::string url = "tcp://";
     url.append(hostname_);
     url.append(":");
-    url.append(std::to_string(port_));
+    url.append(std::to_string(req_port_));
     return url;
   }
   std::string bind_url() {
     std::string url = "tcp://*:";
-    url.append(std::to_string(port_));
+    url.append(std::to_string(req_port_));
+    return url;
+  }
+
+  std::string subscriber_url() {
+    #ifdef PGM
+    std::string url = "pgm://ibp23s0;239.192.1.1:";
+    #else
+    std::string url = "tcp://";
+    url.append(hostname_);
+    url.append(":");
+    #endif
+    url.append(std::to_string(pub_port_));
+    return url;
+  }
+  std::string publisher_url() {
+    #ifdef PGM
+    std::string url = "pgm://ibp23s0;239.192.1.1:";
+    #else
+    std::string url = "tcp://*:";
+    #endif
+    url.append(std::to_string(pub_port_));
     return url;
   }
 
   void print() {
-    printf("id=%d hostname=%s port=%d\n",
-      id_, hostname_.c_str(), port_);
+    printf("id=%d hostname=%s req_port=%d pub_port=%d\n",
+      id_, hostname_.c_str(), req_port_, pub_port_);
   }
   void print_send() {
     printf("send HostData :");
@@ -490,9 +528,9 @@ template <typename T>
   inline auto zmq_msgpk_send_with_type(void* socket, T& data)
 {
   zmq_msgpk_send(socket, T::MSG_TYPE, ZMQ_SNDMORE);
-  #if TRACE
+#if TRACE
   print_send(data);
-  #endif
+#endif
   zmq_msgpk_send(socket, data, 0);
 }
 
@@ -513,9 +551,9 @@ template <typename T>
   msgpack::object_handle hd = msgpack::unpack(static_cast<char*>(zmq_msg_data(&msg)), len);
   hd.get().convert(data);
   int more = zmq_msg_more(&msg);
-  #if TRACE
+#if TRACE
   print_recv(data,more);
-  #endif
+#endif
   rc = zmq_msg_close(&msg);
   assert(rc==0);
 }
@@ -533,9 +571,9 @@ template <typename T>
   inline auto zmq_msgpk_pack_with_type(std::deque<msgpack::sbuffer*>& packs, T& data)
 {
   zmq_msgpk_pack(packs, T::MSG_TYPE);
-  #if TRACE
+#if TRACE
   print_send(data);
-  #endif
+#endif
   zmq_msgpk_pack(packs, data);
 }
 

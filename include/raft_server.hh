@@ -4,17 +4,17 @@
 #include <condition_variable>
 #include <cassert>
 extern "C" {
-  #include <zmq.h>
+  //#include <zmq.h>
   namespace czmq {
     using ::byte;
-    #include <czmq.h>
+    //#include <czmq.h>
   }
   #include "raft.h"
 }
 using namespace czmq;
-#include "raft_msgpack.hh"
+//#include "raft_msgpack.hh"
 #include "raft_cc.hh"
-#include "tx_queue.hh"
+//#include "tx_queue.hh"
 #include "include/log_writer.hh"
 
 //#define N() do{fprintf(stderr, "%16s %4d %16s\n", __FILE__, __LINE__, __func__); fflush(stderr);} while(0)
@@ -41,8 +41,8 @@ public:
 
   template<typename T> void send(T &data) {
     if (sendable_) {
-      zmq_msgpk_send_with_type(socket_, data);
       sendable_ = false;
+      zmq_msgpk_send_with_type(socket_, data);
     } else {
       zmq_msgpk_pack_with_type(packs_, data);
     }
@@ -52,8 +52,8 @@ public:
     if (packs_.empty()) {
       sendable_ = true;
     } else {
-      zmq_msgpk_send_pack(socket_, packs_);
       sendable_ = false;
+      zmq_msgpk_send_pack(socket_, packs_);
     }
   }
 };
@@ -65,6 +65,8 @@ public:
   void *context_;
   raft_server_t *raft_ = NULL;
   zsock_t *bind_socket_ = NULL;
+  zsock_t *publisher_socket_ = NULL;
+  std::map<raft_node_id_t,zsock_t*> subscriber_sockets_;
   zloop_t *loop_ = NULL;
   int timer_id_ = 0;
   std::map<raft_node_id_t,HostData> host_map_;
@@ -79,12 +81,16 @@ public:
   size_t buffer_tail_ = 0;
   size_t max_buffer_size_ = 512; //*1024;
   std::vector<std::pair<raft_node_id_t,raft_appendentries_resp_t>> ap_resp_vec_;
+  std::vector<zsock_t*> receivers_, senders_;
+  size_t thread_num_;
+  size_t entry_latency_ = 0;
+  size_t entry_count_ = 0;
 
-  Server(void *context, int id, TxQueue *tx_queue) :
-    context_(context), id_(id), tx_queue_(tx_queue) {}
+  Server(void *context, int id, TxQueue *tx_queue, size_t thread_num) :
+    context_(context), id_(id), tx_queue_(tx_queue), thread_num_(thread_num) {}
 
   ~Server() {
-    stop();
+    //stop();
     //for (auto x : request_handler_) delete x.second;
     //request_handler_.clear();
     zloop_destroy(&loop_);
@@ -93,8 +99,10 @@ public:
   void setup(std::vector<HostData> &hosts);
   void start(zsock_t *pipe);
   void stop();
-  void send_response_to_clinet(raft_msg_id_t msg_id);
+  void send_response_to_client(raft_msg_id_t msg_id);
   void applylog(raft_entry_t *entry, raft_index_t idx);
+
+  void receive_entry(char *log_set, size_t log_size);
 
   RequestHandler *new_request_handler(raft_node_id_t id, zsock_t *sock) {
     RequestHandler *m = new RequestHandler(this, raft_, id, sock);
@@ -110,4 +118,6 @@ public:
   {
     tx_queue_->push(tx);
   }
+
+  void display(size_t clocks_per_us);
 };
