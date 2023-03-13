@@ -75,4 +75,5 @@ public:
     std::vector<LogRecord> &log_set, size_t thid);
   void send_log(void *log_set, size_t log_size, size_t thid);
   void recv_rep(size_t thid);
+  void send_quit(size_t thid) {}
 };
